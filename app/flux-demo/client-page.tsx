@@ -579,7 +579,7 @@ export default function FluxDemoPage() {
                                                     </div>
                                                 </TooltipTrigger>
                                                 <TooltipContent className="max-w-xs">
-                                                    <p>When enabled, the server will notify us when your image is ready. This helps bypass Vercel's 60-second function timeout limit for longer image generations.</p>
+                                                    <p>When enabled, the server will notify us when your image is ready. This helps bypass Vercel&apos;s 60-second function timeout limit for longer image generations.</p>
                                                 </TooltipContent>
                                             </Tooltip>
                                         </TooltipProvider>
