@@ -208,16 +208,6 @@ export function HeaderNavSheet() {
             Crypto
           </div>
 
-          <CustomLink href={'/flux-demo'} onClick={handleOpenChange} target={false}>
-            <div className="flex">
-              <h1 className="flex items-center text-lg no-underline">
-                <Bot className="size-5 min-h-[24px] min-w-[24px]" />
-              </h1>
-            </div>
-
-            <CustomLinkText>FLUX.1 Demo</CustomLinkText>
-          </CustomLink>
-
           <CustomLink href={'/nft-minter'} onClick={handleOpenChange} target={false}>
             <div className="flex">
               <h1 className="flex items-center text-lg no-underline">
