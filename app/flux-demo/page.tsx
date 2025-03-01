@@ -16,7 +16,7 @@ export const metadata: Metadata = {
         url: 'https://cardano-degen-club.vercel.app/flux-demo',
         images: [
             {
-                url: '/images/flux-preview.jpg', // You'll need to create and add this image
+                url: '/images/flux-preview.png', // You'll need to create and add this image
                 width: 1200,
                 height: 630,
                 alt: 'FLUX.1-dev Image Generator Preview',
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
         card: 'summary_large_image',
         title: 'FLUX.1-dev Image Generator',
         description: 'Create beautiful AI-generated images from text prompts with FLUX.1-dev.',
-        images: ['/images/flux-preview.jpg'], // Same image as OG
+        images: ['/images/flux-preview.png'], // Same image as OG
         creator: 'cardano-tools.xyz', // Replace with your actual Twitter handle
     },
 
