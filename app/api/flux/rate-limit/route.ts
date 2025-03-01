@@ -33,12 +33,16 @@ function getClientIp(request: NextRequest): string {
 async function getRateLimitStatus(ip: string): Promise<{
   limit: number
   remaining: number
-  resetTime: number
+  resetTime: number | null
 }> {
   const key = `flux:${ip}`
+  const resetKey = `flux:reset:${ip}`
 
   // Get current usage from Vercel KV
   let usage = (await kv.get<number[]>(key)) || []
+
+  // Get stored reset time if it exists
+  const storedResetTime = await kv.get<number>(resetKey)
 
   // Current timestamp in seconds
   const now = Math.floor(Date.now() / 1000)
@@ -47,24 +51,32 @@ async function getRateLimitStatus(ip: string): Promise<{
   usage = usage.filter((timestamp) => now - timestamp < RATE_LIMIT_WINDOW)
 
   // Calculate when the oldest timestamp will expire
-  let resetTime: number
+  let resetTime: number | null = null
 
-  if (usage.length === 0) {
-    // If no usage, reset time is now (already reset)
-    resetTime = now
-  } else if (usage.length < RATE_LIMIT) {
-    // If under the limit, reset time is when the window ends from now
+  // If we have a stored reset time, use that
+  if (storedResetTime) {
+    resetTime = storedResetTime
+
+    // If the reset time has passed, clear it and reset usage
+    if (now > resetTime) {
+      await kv.del(resetKey)
+      usage = []
+      await kv.set(key, usage, { ex: RATE_LIMIT_WINDOW })
+    }
+  }
+  // If user just hit the limit with this request, set a new reset time
+  else if (usage.length >= RATE_LIMIT) {
+    // Set reset time to exactly 60 minutes from now
     resetTime = now + RATE_LIMIT_WINDOW
-  } else {
-    // If at the limit, reset time is when the oldest timestamp expires
-    const oldestTimestamp = Math.min(...usage)
-    resetTime = oldestTimestamp + RATE_LIMIT_WINDOW
+
+    // Store the reset time
+    await kv.set(resetKey, resetTime, { ex: RATE_LIMIT_WINDOW + 60 }) // Add a little buffer to the expiry
   }
 
   return {
     limit: RATE_LIMIT,
     remaining: Math.max(0, RATE_LIMIT - usage.length),
-    resetTime: resetTime * 1000, // Convert to milliseconds for JavaScript Date
+    resetTime: resetTime ? resetTime * 1000 : null, // Convert to milliseconds for JavaScript Date or return null
   }
 }
 

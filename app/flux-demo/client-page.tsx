@@ -95,7 +95,10 @@ export default function FluxDemoPage() {
 
     // Format time until reset
     const formatTimeUntilReset = () => {
-        if (!rateLimit.resetTime) return 'within the hour';
+        if (!rateLimit.resetTime) {
+            // If no reset time is set, it means the user hasn't used all their downloads yet
+            return null; // Return null to indicate no timer should be shown
+        }
 
         const now = new Date();
         const timeDiff = rateLimit.resetTime.getTime() - now.getTime();
@@ -106,9 +109,9 @@ export default function FluxDemoPage() {
         const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
 
         if (minutes > 0) {
-            return `in ${minutes}m ${seconds}s`;
+            return `${minutes}m ${seconds}s`;
         } else {
-            return `in ${seconds}s`;
+            return `${seconds}s`;
         }
     };
 
@@ -283,7 +286,11 @@ export default function FluxDemoPage() {
                                 </TooltipProvider>
                             </div>
                             <span className="text-sm text-muted-foreground">
-                                Resets {formatTimeUntilReset()}
+                                {rateLimit.remaining === 0 && formatTimeUntilReset()
+                                    ? `Resets in ${formatTimeUntilReset()}`
+                                    : rateLimit.remaining < rateLimit.limit
+                                        ? `${rateLimit.remaining} of ${rateLimit.limit} remaining`
+                                        : `${rateLimit.limit} images available`}
                             </span>
                         </div>
                         <div className="flex items-center space-x-4">
@@ -298,7 +305,9 @@ export default function FluxDemoPage() {
                         {rateLimit.remaining === 0 && (
                             <div className="mt-1 flex items-center text-amber-500 text-sm">
                                 <AlertCircle className="mr-1 h-4 w-4" />
-                                Rate limit reached. Please try again {formatTimeUntilReset()}.
+                                {formatTimeUntilReset()
+                                    ? `Rate limit reached. Try again in ${formatTimeUntilReset()}.`
+                                    : 'Rate limit reached. Please wait for reset.'}
                             </div>
                         )}
                     </div>

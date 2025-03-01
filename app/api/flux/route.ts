@@ -52,30 +52,50 @@ function getClientIp(request: NextRequest): string {
 }
 
 // Check rate limit for the given IP address
-async function checkRateLimit(ip: string): Promise<{ allowed: boolean; remaining: number }> {
+async function checkRateLimit(ip: string): Promise<{
+  allowed: boolean
+  remaining: number
+  resetTime: number | null
+}> {
   const key = `flux:${ip}`
+  const resetKey = `flux:reset:${ip}`
 
   // Get current usage from Vercel KV
   let usage = (await kv.get<number[]>(key)) || []
 
+  // Get stored reset time if it exists
+  const storedResetTime = await kv.get<number>(resetKey)
+
   // Current timestamp in seconds
   const now = Math.floor(Date.now() / 1000)
+
+  // If we have a stored reset time and it has passed, clear it and reset usage
+  if (storedResetTime && now > storedResetTime) {
+    await kv.del(resetKey)
+    usage = []
+    await kv.set(key, usage, { ex: RATE_LIMIT_WINDOW })
+    return { allowed: true, remaining: RATE_LIMIT, resetTime: null }
+  }
 
   // Filter out timestamps older than the rate limit window
   usage = usage.filter((timestamp) => now - timestamp < RATE_LIMIT_WINDOW)
 
   // Check if the rate limit has been exceeded
   if (usage.length >= RATE_LIMIT) {
-    return { allowed: false, remaining: 0 }
+    return { allowed: false, remaining: 0, resetTime: storedResetTime }
   }
 
   // For HEAD requests, we don't add a timestamp (just checking status)
-  return { allowed: true, remaining: RATE_LIMIT - usage.length }
+  return { allowed: true, remaining: RATE_LIMIT - usage.length, resetTime: null }
 }
 
 // Add a timestamp to the usage array (only for actual image generation requests)
-async function incrementRateLimit(ip: string): Promise<number> {
+async function incrementRateLimit(ip: string): Promise<{
+  remaining: number
+  resetTime: number | null
+}> {
   const key = `flux:${ip}`
+  const resetKey = `flux:reset:${ip}`
 
   // Get current usage from Vercel KV
   let usage = (await kv.get<number[]>(key)) || []
@@ -93,7 +113,23 @@ async function incrementRateLimit(ip: string): Promise<number> {
   // Set TTL to expire the key after the rate limit window
   await kv.set(key, usage, { ex: RATE_LIMIT_WINDOW })
 
-  return RATE_LIMIT - usage.length
+  // Check if this request just hit the limit
+  let resetTime: number | null = null
+  if (usage.length === RATE_LIMIT) {
+    // Set reset time to exactly 60 minutes from now
+    resetTime = now + RATE_LIMIT_WINDOW
+
+    // Store the reset time
+    await kv.set(resetKey, resetTime, { ex: RATE_LIMIT_WINDOW + 60 }) // Add a little buffer to the expiry
+  } else if (usage.length > RATE_LIMIT) {
+    // If we're over the limit, get the stored reset time
+    resetTime = await kv.get<number>(resetKey)
+  }
+
+  return {
+    remaining: Math.max(0, RATE_LIMIT - usage.length),
+    resetTime,
+  }
 }
 
 // Handler for HEAD requests - check rate limit without generating an image
@@ -103,19 +139,23 @@ export async function HEAD(request: NextRequest) {
     const clientIp = getClientIp(request)
 
     // Check rate limit status (without incrementing)
-    const { allowed, remaining } = await checkRateLimit(clientIp)
+    const { allowed, remaining, resetTime } = await checkRateLimit(clientIp)
 
-    // Calculate reset time
-    const resetTime = Math.floor(Date.now() / 1000) + RATE_LIMIT_WINDOW
+    // Calculate reset time only if rate limit is reached
+    const headers: Record<string, string> = {
+      'X-RateLimit-Limit': RATE_LIMIT.toString(),
+      'X-RateLimit-Remaining': remaining.toString(),
+    }
+
+    // Only add reset time if rate limit is reached and we have a reset time
+    if (remaining === 0 && resetTime) {
+      headers['X-RateLimit-Reset'] = resetTime.toString()
+    }
 
     // Return rate limit headers with empty response
     return new NextResponse(null, {
       status: 200,
-      headers: {
-        'X-RateLimit-Limit': RATE_LIMIT.toString(),
-        'X-RateLimit-Remaining': remaining.toString(),
-        'X-RateLimit-Reset': resetTime.toString(),
-      },
+      headers,
     })
   } catch (error) {
     console.error('Error checking rate limit:', error)
@@ -129,10 +169,20 @@ export async function POST(request: NextRequest) {
     const clientIp = getClientIp(request)
 
     // Check rate limit
-    const { allowed, remaining } = await checkRateLimit(clientIp)
+    const { allowed, remaining, resetTime } = await checkRateLimit(clientIp)
 
     // If rate limit exceeded, return error
     if (!allowed) {
+      const headers: Record<string, string> = {
+        'X-RateLimit-Limit': RATE_LIMIT.toString(),
+        'X-RateLimit-Remaining': '0',
+      }
+
+      // Add reset time if available
+      if (resetTime) {
+        headers['X-RateLimit-Reset'] = resetTime.toString()
+      }
+
       return NextResponse.json(
         {
           success: false,
@@ -140,11 +190,7 @@ export async function POST(request: NextRequest) {
         },
         {
           status: 429,
-          headers: {
-            'X-RateLimit-Limit': RATE_LIMIT.toString(),
-            'X-RateLimit-Remaining': '0',
-            'X-RateLimit-Reset': (Math.floor(Date.now() / 1000) + RATE_LIMIT_WINDOW).toString(),
-          },
+          headers,
         },
       )
     }
@@ -178,11 +224,23 @@ export async function POST(request: NextRequest) {
     })
 
     // Increment rate limit usage
-    const remainingAfterRequest = await incrementRateLimit(clientIp)
+    const { remaining: remainingAfterRequest, resetTime: newResetTime } =
+      await incrementRateLimit(clientIp)
 
     // The response is a Blob containing the image data
     const imageBytes = await response.arrayBuffer()
     const base64Image = Buffer.from(imageBytes).toString('base64')
+
+    // Prepare headers
+    const headers: Record<string, string> = {
+      'X-RateLimit-Limit': RATE_LIMIT.toString(),
+      'X-RateLimit-Remaining': remainingAfterRequest.toString(),
+    }
+
+    // Only add reset time if rate limit is reached and we have a reset time
+    if (remainingAfterRequest === 0 && newResetTime) {
+      headers['X-RateLimit-Reset'] = newResetTime.toString()
+    }
 
     // Return the generated image as a base64 string along with metadata
     return NextResponse.json(
@@ -198,11 +256,7 @@ export async function POST(request: NextRequest) {
         },
       },
       {
-        headers: {
-          'X-RateLimit-Limit': RATE_LIMIT.toString(),
-          'X-RateLimit-Remaining': remainingAfterRequest.toString(),
-          'X-RateLimit-Reset': (Math.floor(Date.now() / 1000) + RATE_LIMIT_WINDOW).toString(),
-        },
+        headers,
       },
     )
   } catch (error) {
