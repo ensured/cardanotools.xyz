@@ -16,6 +16,7 @@ import {
   FileKey,
   Send,
   Wallet,
+  Bot,
 } from 'lucide-react'
 import { useCommits } from './CommitContext'
 import { timeAgo } from '@/utils/timeAgo'
@@ -206,6 +207,16 @@ export function HeaderNavSheet() {
           <div className="text-xl font-semibold text-[hsl(275,70%,60%)] dark:text-[hsl(276,70%,60%)]">
             Crypto
           </div>
+
+          <CustomLink href={'/flux-demo'} onClick={handleOpenChange} target={false}>
+            <div className="flex">
+              <h1 className="flex items-center text-lg no-underline">
+                <Bot className="size-5 min-h-[24px] min-w-[24px]" />
+              </h1>
+            </div>
+
+            <CustomLinkText>FLUX.1 Demo</CustomLinkText>
+          </CustomLink>
 
           <CustomLink href={'/nft-minter'} onClick={handleOpenChange} target={false}>
             <div className="flex">
