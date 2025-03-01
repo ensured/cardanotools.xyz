@@ -2,6 +2,12 @@ import FluxDemoPage from "./client-page";
 import { currentUser } from '@clerk/nextjs/server'
 import { AlertCircle } from 'lucide-react'
 
+// export metadata for nextjs page
+export const metadata = {
+    title: 'Flux Demo',
+    description: 'Flux Demo',
+}
+
 export default async function page() {
     // const whitelistedEmails = process.env.WHITELISTED_EMAILS_FOR_FLUX_DEMO?.split(',') || [];
     const user = await currentUser()
