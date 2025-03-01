@@ -42,16 +42,20 @@ export default function FluxDemoPage() {
     // Example prompts
     const examplePrompts = [
         {
-            title: "Playful Cats in Sunlit Room",
-            text: "An enchanting scene in a cozy, sunlit room where two playful cats are chasing each other around a fluffy rug. One cat is a sleek black Persian with glowing golden eyes, and the other is a mischievous tabby with bright green eyes. The room is filled with potted plants, soft pillows, and a large window showing a warm, golden sunset. The cats' fur is gently illuminated by the soft light, and their playful expressions capture the joy of the moment. The overall atmosphere is warm, inviting, and filled with soft pastel colors."
+            title: "Cyberpunk Street Market",
+            text: "A vibrant cyberpunk night market in Neo-Tokyo, 2089. Narrow streets lined with glowing neon signs in pink, blue, and purple. Holographic advertisements float above crowded food stalls selling steaming ramen and synthetic sushi. Rain-slicked streets reflect the neon lights while steam rises from vents. Diverse crowd of humans with cybernetic enhancements and androids browse market stalls selling advanced tech gadgets. Towering skyscrapers loom overhead, their facades covered in massive LED screens. Photorealistic, detailed, cinematic lighting, 8K resolution."
         },
         {
-            title: "Futuristic Cityscape",
-            text: "A breathtaking futuristic cityscape at dusk, with towering crystalline skyscrapers that reflect the purple and orange sunset. Flying vehicles navigate between buildings, and holographic advertisements illuminate the scene. The city is built around a central park with bioluminescent plants and trees that glow in ethereal blues and greens."
+            title: "Underwater Ancient Temple",
+            text: "A breathtaking underwater ancient temple discovered in the depths of the Mediterranean Sea. Massive marble columns covered in colorful coral and sea anemones. Shafts of sunlight pierce through the clear turquoise water, creating ethereal light beams that illuminate the temple interior. Schools of tropical fish in vibrant blues and yellows swim between ornate stone statues of forgotten sea deities. A partially collapsed dome reveals an intricate mosaic floor depicting an ancient maritime civilization. Bubbles rise gently toward the surface. Hyper-detailed, atmospheric, professional underwater photography style."
         },
         {
-            title: "Enchanted Forest",
-            text: "A mystical enchanted forest at twilight, where ancient trees with twisted trunks reach toward a starry sky. Glowing mushrooms and luminescent flowers carpet the forest floor, while fireflies and tiny fairies dance among the branches. A small, hidden cottage with a warm golden light shining from its windows sits nestled between the roots of a massive oak tree."
+            title: "Enchanted Library",
+            text: "An impossibly vast magical library stretching endlessly in all directions. Towering bookshelves reach hundreds of feet high, connected by ornate spiral staircases and floating platforms. Books with glowing spines and animated covers organize themselves. Magical orbs of soft golden light float between the shelves. Wizards in flowing robes study at antique wooden desks while magical creatures like tiny dragons and phoenix birds perch on chandeliers. Dust motes sparkle in beams of colored light streaming through massive stained glass windows. Warm color palette, magical atmosphere, intricate details, fantasy illustration style."
+        },
+        {
+            title: "Alpine Cabin Sunset",
+            text: "A cozy wooden cabin nestled in the Swiss Alps at sunset. Fresh snow blankets the steep roof and surrounding pine forest. Warm golden light spills from windows onto pristine snow that sparkles with ice crystals. Smoke curls from a stone chimney into the crisp mountain air. Majestic snow-capped peaks in the background are painted in dramatic purple and orange hues from the setting sun. A frozen lake in the valley below reflects the colorful sky. Inside glimpses show a crackling fireplace and rustic wooden furniture. Photorealistic, winter landscape photography, golden hour lighting."
         }
     ];
 
@@ -72,7 +76,7 @@ export default function FluxDemoPage() {
     // State to force re-render for timer updates
     const [timerTick, setTimerTick] = useState(0);
 
-    // Effect for countdown timer
+    // Effect for countdown timer - only updates the UI, doesn't fetch rate limit
     useEffect(() => {
         // Only start the timer if we have a reset time
         if (!rateLimit.resetTime) return;
@@ -82,16 +86,22 @@ export default function FluxDemoPage() {
             // Force component to re-render by updating tick state
             setTimerTick(prev => prev + 1);
 
-            // If current time is past reset time, refresh the rate limit status
+            // Check if reset time has passed
             const now = new Date();
             if (rateLimit.resetTime && now > rateLimit.resetTime) {
-                fetchRateLimitStatus();
+                // Instead of fetching, just update the UI to show full quota
+                // The next actual API call will get the real updated values
+                setRateLimit(prev => ({
+                    ...prev,
+                    remaining: prev.limit,
+                    resetTime: null
+                }));
             }
         }, 1000);
 
         // Cleanup interval on unmount or when reset time changes
         return () => clearInterval(intervalId);
-    }, [rateLimit.resetTime]);
+    }, [rateLimit.resetTime, rateLimit.limit]);
 
     // Format time until reset
     const formatTimeUntilReset = () => {
@@ -140,16 +150,12 @@ export default function FluxDemoPage() {
         }
     };
 
-    // Initial rate limit check
+    // Initial rate limit check - only once when component mounts
     useEffect(() => {
         // Fetch initial rate limit status when component mounts
         fetchRateLimitStatus();
 
-        // Set up a refresh interval (every minute)
-        const refreshInterval = setInterval(fetchRateLimitStatus, 60000);
-
-        // Clean up interval on unmount
-        return () => clearInterval(refreshInterval);
+        // No more periodic polling
     }, []);
 
     // Get current resolution settings
