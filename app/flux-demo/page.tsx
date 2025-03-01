@@ -1,11 +1,44 @@
 import FluxDemoPage from "./client-page";
 import { currentUser } from '@clerk/nextjs/server'
 import { AlertCircle } from 'lucide-react'
+import { Metadata } from 'next'
 
-// export metadata for nextjs page
-export const metadata = {
-    title: 'Flux Demo',
-    description: 'Flux Demo',
+// Enhanced metadata for better link previews
+export const metadata: Metadata = {
+    title: 'FLUX.1-dev Image Generator | cardano-tools.xyz',
+    description: 'Generate stunning AI images with FLUX.1-dev - a powerful image generation tool that transforms your text prompts into beautiful visuals.',
+
+    // Open Graph metadata for social media platforms like Facebook
+    openGraph: {
+        title: 'FLUX.1-dev Image Generator | cardano-tools.xyz',
+        description: 'Transform your ideas into stunning visuals with our AI-powered image generator.',
+        type: 'website',
+        url: 'https://cardano-degen-club.vercel.app/flux-demo',
+        images: [
+            {
+                url: '/images/flux-preview.jpg', // You'll need to create and add this image
+                width: 1200,
+                height: 630,
+                alt: 'FLUX.1-dev Image Generator Preview',
+            },
+        ],
+        siteName: 'cardano-tools.xyz',
+    },
+
+    // Twitter card metadata
+    twitter: {
+        card: 'summary_large_image',
+        title: 'FLUX.1-dev Image Generator',
+        description: 'Create beautiful AI-generated images from text prompts with FLUX.1-dev.',
+        images: ['/images/flux-preview.jpg'], // Same image as OG
+        creator: 'cardano-tools.xyz', // Replace with your actual Twitter handle
+    },
+
+    // Additional metadata
+    keywords: ['AI image generator', 'FLUX', 'text-to-image', 'Cardano', 'NFT', 'digital art'],
+    authors: [{ name: 'cardano-tools.xyz' }],
+    creator: 'cardano-tools.xyz',
+    publisher: 'cardano-tools.xyz',
 }
 
 export default async function page() {

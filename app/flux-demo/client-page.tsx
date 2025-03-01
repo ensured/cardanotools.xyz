@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
+import { Skeleton } from '@/components/ui/skeleton';
 
 // Predefined resolution options
 const RESOLUTION_PRESETS = {
@@ -445,8 +446,34 @@ export default function FluxDemoPage() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="p-4 flex items-center justify-center h-64 text-gray-500 border rounded-md">
-                                {loading ? 'Generating image...' : 'Generated image will appear here'}
+                            <div className="flex flex-col items-center justify-center h-64 border rounded-md overflow-hidden">
+                                {loading ? (
+                                    <div className="w-full h-full flex flex-col items-center justify-center space-y-4 p-6">
+                                        {/* Skeleton for the image being generated */}
+                                        <div className="relative w-full h-full">
+                                            <Skeleton className="w-full h-48 rounded-md" />
+
+                                            {/* Animated gradient overlay to make it more interesting */}
+                                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-pulse" />
+
+                                            {/* Skeleton for metadata bar */}
+                                            <div className="absolute bottom-0 left-0 right-0 flex justify-between p-2 bg-black/20">
+                                                <Skeleton className="h-4 w-16" />
+                                                <Skeleton className="h-4 w-24" />
+                                            </div>
+                                        </div>
+
+                                        <div className="text-sm text-muted-foreground mt-2 flex items-center space-x-2">
+                                            <div className="animate-spin h-4 w-4 border-2 border-primary border-t-transparent rounded-full" />
+                                            <span>Generating your masterpiece...</span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center space-y-3 p-6 text-muted-foreground">
+                                        <Image className="h-10 w-10 opacity-40" />
+                                        <p>Generated image will appear here</p>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </CardContent>
