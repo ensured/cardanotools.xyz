@@ -15,6 +15,11 @@ import { Switch } from '@/components/ui/switch';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Skeleton } from '@/components/ui/skeleton';
 
+// Constants
+const MAX_RETRIES = 2;
+const MAX_POLL_TIME = 300000; // 5 minutes max polling (matching client-side timeout)
+const POLL_INTERVAL = 2000; // Check every 2 seconds
+
 // Predefined resolution options
 const RESOLUTION_PRESETS = {
     'square_1024': { width: 1024, height: 1024, label: 'Square (1024×1024)' },
@@ -40,6 +45,31 @@ export default function FluxDemoPage() {
         timestamp: string;
     } | null>(null);
 
+    // State for different API approaches
+    const [useCallbackApproach, setUseCallbackApproach] = useState(true);
+
+    // State for retry handling
+    const [isRetrying, setIsRetrying] = useState(false);
+    const [retryCount, setRetryCount] = useState(0);
+
+    // State for job tracking and polling
+    const [isPolling, setIsPolling] = useState(false);
+    const [jobId, setJobId] = useState<string | null>(null);
+    const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+
+    // State for rate limiting
+    const [rateLimit, setRateLimit] = useState({
+        limit: 10,
+        remaining: 10,
+        resetTime: null as Date | null
+    });
+
+    // State to force re-render for timer updates
+    const [timerTick, setTimerTick] = useState(0);
+
+    // Quality settings
+    const [selectedResolution, setSelectedResolution] = useState(DEFAULT_RESOLUTION);
+
     // Example prompts
     const examplePrompts = [
         {
@@ -64,18 +94,6 @@ export default function FluxDemoPage() {
     const applyExamplePrompt = (promptText: string) => {
         setPrompt(promptText);
     };
-
-    // Quality settings
-    const [selectedResolution, setSelectedResolution] = useState(DEFAULT_RESOLUTION);
-
-    // Rate limit state
-    const [rateLimit, setRateLimit] = useState({
-        limit: 10,
-        remaining: 10,
-        resetTime: null as Date | null
-    });
-    // State to force re-render for timer updates
-    const [timerTick, setTimerTick] = useState(0);
 
     // Effect for countdown timer - only updates the UI, doesn't fetch rate limit
     useEffect(() => {
@@ -226,15 +244,131 @@ export default function FluxDemoPage() {
         return new Blob(byteArrays, { type: mimeType });
     };
 
+    // Function to check job status (enhanced to check both direct status and callback)
+    const checkJobStatus = async (id: string) => {
+        try {
+            // If using callback approach, check the callback endpoint first
+            if (useCallbackApproach) {
+                const callbackRes = await fetch(`/api/flux/callback?jobId=${id}`);
+
+                if (callbackRes.ok) {
+                    const callbackData = await callbackRes.json();
+
+                    // If we have callback data and it's complete, use it
+                    if (callbackData.status === 'completed') {
+                        setImageData(callbackData.imageData);
+                        setImageMetadata(callbackData.metadata);
+                        setLoading(false);
+
+                        // Clear the polling interval
+                        if (pollInterval) {
+                            clearInterval(pollInterval);
+                            setPollInterval(null);
+                        }
+
+                        // Fetch updated rate limit
+                        fetchRateLimitStatus();
+
+                        return callbackData;
+                    }
+                    // If we have callback data and it failed, show error
+                    else if (callbackData.status === 'failed') {
+                        setError(`Image generation failed: ${callbackData.error?.message || 'Unknown error'}`);
+                        setLoading(false);
+
+                        // Clear the polling interval
+                        if (pollInterval) {
+                            clearInterval(pollInterval);
+                            setPollInterval(null);
+                        }
+
+                        return callbackData;
+                    }
+                    // If callback status is anything else, it might be in process or waiting
+                }
+            }
+
+            // If no callback or callback check didn't resolve, fall back to direct job status check
+            const res = await fetch(`/api/flux?jobId=${id}`);
+
+            if (!res.ok) {
+                throw new Error('Failed to check job status');
+            }
+
+            const data = await res.json();
+
+            // If the job is completed, show the image
+            if (data.status === 'completed') {
+                setImageData(data.imageData);
+                setImageMetadata(data.metadata);
+                setLoading(false);
+
+                // Clear the polling interval
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                    setPollInterval(null);
+                }
+
+                // Fetch updated rate limit
+                fetchRateLimitStatus();
+            }
+            // If the job failed, show an error
+            else if (data.status === 'failed') {
+                setError(`Image generation failed: ${data.error || 'Unknown error'}`);
+                setLoading(false);
+
+                // Clear the polling interval
+                if (pollInterval) {
+                    clearInterval(pollInterval);
+                    setPollInterval(null);
+                }
+            }
+
+            return data;
+        } catch (err) {
+            console.error('Error checking job status:', err);
+
+            // Don't stop polling on temporary errors
+            return null;
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setError('');
         setImageData('');
         setImageMetadata(null);
+        setIsPolling(false);
+        setJobId(null);
+
+        // Clear any existing polling
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            setPollInterval(null);
+        }
+
+        // Reset retry state
+        if (!isRetrying) {
+            setRetryCount(0);
+        }
 
         try {
             const resolution = getCurrentResolution();
+
+            // Generate a callback URL if using callback approach
+            // Use the public URL of the site or localhost in development
+            let callbackUrl = null;
+            if (useCallbackApproach) {
+                // In production, use the actual domain
+                const host = window.location.host;
+                const protocol = window.location.protocol;
+                callbackUrl = `${protocol}//${host}/api/flux/callback`;
+            }
+
+            // Add timeout for the fetch request
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 300000); // 5-minute client-side timeout
 
             const res = await fetch('/api/flux', {
                 method: 'POST',
@@ -245,12 +379,14 @@ export default function FluxDemoPage() {
                     prompt,
                     width: resolution.width,
                     height: resolution.height,
-                    highQuality: false // Always set to false since we removed the toggle
+                    highQuality: false,
+                    callbackUrl
                 }),
+                signal: controller.signal
             });
 
-            // After image generation, fetch the updated rate limit status
-            fetchRateLimitStatus();
+            // Clear the timeout if request completes
+            clearTimeout(timeoutId);
 
             const data = await res.json();
 
@@ -258,8 +394,50 @@ export default function FluxDemoPage() {
                 throw new Error(data.error || 'Something went wrong');
             }
 
+            // Check if we received a job ID
+            if (data.jobId) {
+                setJobId(data.jobId);
+                setIsPolling(true);
+
+                // Start polling for job status
+                const startTime = Date.now();
+
+                // First check immediately
+                const initialStatus = await checkJobStatus(data.jobId);
+
+                // If already completed, no need to set up interval
+                if (initialStatus?.status === 'completed') {
+                    return;
+                }
+
+                // Set up polling interval (less frequent if using callbacks)
+                const interval = setInterval(async () => {
+                    // Check if we've been polling too long
+                    if (Date.now() - startTime > MAX_POLL_TIME) {
+                        clearInterval(interval);
+                        setPollInterval(null);
+                        setLoading(false);
+                        setError('Image generation is taking longer than expected. This might be due to Vercel\'s 60-second function timeout. The image might still be processing in the background - try refreshing in a minute.');
+                        return;
+                    }
+
+                    await checkJobStatus(data.jobId);
+                }, useCallbackApproach ? POLL_INTERVAL * 2 : POLL_INTERVAL); // Poll less frequently with callbacks
+
+                setPollInterval(interval);
+
+                // Don't set loading to false - we're still waiting for the image
+                return;
+            }
+
+            // Legacy path (direct response)
             setImageData(data.imageData);
             setImageMetadata(data.metadata);
+            setIsRetrying(false);
+            setRetryCount(0);
+
+            // Fetch updated rate limit status
+            fetchRateLimitStatus();
         } catch (err) {
             console.error('Error:', err);
             setError(err instanceof Error ? err.message : 'An unexpected error occurred');
@@ -382,6 +560,29 @@ export default function FluxDemoPage() {
                                                 ))}
                                             </SelectContent>
                                         </Select>
+                                    </div>
+
+                                    <div className="flex items-center space-x-2 pt-2">
+                                        <Switch
+                                            id="callback-mode"
+                                            checked={useCallbackApproach}
+                                            onCheckedChange={setUseCallbackApproach}
+                                        />
+                                        <Label htmlFor="callback-mode" className="text-xs">
+                                            Use webhook callback (faster)
+                                        </Label>
+                                        <TooltipProvider>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <div>
+                                                        <Info className="h-4 w-4 text-muted-foreground" />
+                                                    </div>
+                                                </TooltipTrigger>
+                                                <TooltipContent className="max-w-xs">
+                                                    <p>When enabled, the server will notify us when your image is ready. This helps bypass Vercel's 60-second function timeout limit for longer image generations.</p>
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </TooltipProvider>
                                     </div>
                                 </div>
                             </div>
