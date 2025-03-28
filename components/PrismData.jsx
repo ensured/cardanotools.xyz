@@ -9,41 +9,38 @@ import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 
-import { Button, buttonVariants } from "./ui/button"
-
 const PrismData = () => {
-  const [fontSize, setFontSize] = useState("14px") // Default font size
-
+  const [fontSize, setFontSize] = useState("14px")
+  const [isMounted, setIsMounted] = useState(false)
   const codeRef = useRef(null)
 
   useEffect(() => {
+    setIsMounted(true)
     Prism.highlightAll()
-    adjustFontSize() // Call the function initially
-    window.addEventListener("resize", adjustFontSize) // Adjust font size on window resize
+    adjustFontSize()
+    window.addEventListener("resize", adjustFontSize)
     return () => {
-      window.removeEventListener("resize", adjustFontSize) // Cleanup event listener
+      window.removeEventListener("resize", adjustFontSize)
     }
   }, [])
 
   const adjustFontSize = () => {
+    if (!isMounted) return
+    
     const screenWidth = window.innerWidth
     let fontSize
 
     if (screenWidth < 500) {
-      fontSize = "0.69rem" // Adjust font size for very small screens
+      fontSize = "0.69rem"
     } else if (screenWidth >= 512 && screenWidth < 640) {
-      fontSize = "0.75rem" // Adjust font size for small screens
+      fontSize = "0.75rem"
     } else if (screenWidth >= 640 && screenWidth < 768) {
-      fontSize = "0.95rem" // Adjust font size for medium screens (sm)
+      fontSize = "0.95rem"
     } else if (screenWidth >= 768) {
-      fontSize = "1rem" // Adjust font size for large screens (md) and above
+      fontSize = "1rem"
     }
 
-    // Apply the font size to code blocks
-    const codeBlocks = document.querySelectorAll("pre[class*='language-']")
-    codeBlocks.forEach((block) => {
-      block.style.fontSize = fontSize
-    })
+    setFontSize(fontSize)
   }
 
   const handleCopy = () => {
@@ -103,14 +100,11 @@ const PrismData = () => {
 
   return (
     <div>
-      <pre className="rounded-md">
-        {/* button to copy text */}
+      <pre 
+        className={cn("rounded-md", "language-javascript")}
+        tabIndex={0}
+      >
         <div className={cn("relative flex")}>
-          {/* <Button
-            variant={"green"}
-            className="w-14 absolute text-lg font-bold md:text-2xl -right-3 bg-slate-50/20 -top-2"
-
-          > */}
           <CopyIcon
             size={"30px"}
             onClick={handleCopy}
@@ -120,7 +114,7 @@ const PrismData = () => {
         <code
           className="language-javascript"
           ref={codeRef}
-          style={{ fontSize: fontSize }}
+          style={{ fontSize: isMounted ? fontSize : "14px" }}
         >
           {code}
         </code>

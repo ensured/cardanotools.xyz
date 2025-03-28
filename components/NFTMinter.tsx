@@ -66,8 +66,6 @@ import { useDropzone } from 'react-dropzone'
 import { cn } from '@/lib/utils'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 type CardanoNetwork = 'Mainnet' | 'Preview' | 'Preprod'
 export const CARDANO_NETWORK: CardanoNetwork = 'Mainnet'
@@ -367,16 +365,20 @@ const FileUploadArea = ({
         <div className="flex flex-col items-center justify-center gap-2 text-center">
           <div
             className={cn(
-              'rounded-full p-2 transition-colors',
+              'rounded-full p-2 transition-colors flex items-center gap-1.5',
               isDragActive ? 'bg-primary/10' : 'bg-muted',
             )}
           >
+              <div className='text-xs text-muted-foreground'>
+            Pin to IPFS
+            </div>
             <Upload
-              className={cn('h-6 w-6', isDragActive ? 'text-primary' : 'text-muted-foreground')}
+              className={cn('h-5 w-5', isDragActive ? 'text-primary' : 'text-muted-foreground')}
             />
           </div>
-
+        
           <div className="flex flex-col gap-1">
+          
             <p className="text-sm font-medium">
               {isDragActive ? 'Drop files here' : 'Drag & drop files here'}
             </p>
@@ -461,6 +463,18 @@ const truncateFileName = (fileName: string, maxLength: number = 64) => {
 // Add this helper function for delay
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+// Add this new component for JSON formatting
+const JsonPreview: React.FC<{ data: any }> = ({ data }) => {
+  return (
+    <pre
+      className="m-0 rounded-lg bg-[#282c34] p-4 font-mono text-sm text-white"
+      style={{ margin: 0, fontSize: '0.85rem' }}
+    >
+      {JSON.stringify(data, null, 2)}
+    </pre>
+  );
+};
+
 export default function NFTMinter() {
   const [selectedFiles, setSelectedFiles] = useState<FileInfo[]>([])
   const [uploading, setUploading] = useState(false)
@@ -474,6 +488,7 @@ export default function NFTMinter() {
   const [scanning, setScanning] = useState(false)
   const [minting, setMinting] = useState(false)
   const [nftName, setNftName] = useState('')
+  const [nftTitle, setNftTitle] = useState('') // Add this line
   const [nftDescription, setNftDescription] = useState('')
   const [loadingFiles, setLoadingFiles] = useState(false)
   const [currentStep, setCurrentStep] = useState(1)
@@ -543,7 +558,7 @@ export default function NFTMinter() {
       case 3:
         return Boolean(selectedPolicy)
       case 4:
-        return Boolean(selectedPolicy && nftName && nftDescription && selectedFiles.length > 0)
+        return Boolean(selectedPolicy && nftName && nftTitle && nftDescription && selectedFiles.length > 0)
       default:
         return false
     }
@@ -753,6 +768,7 @@ export default function NFTMinter() {
     lucid: LucidEvolution,
     selectedPolicy: PolicyInfo,
     nftName: string,
+    nftTitle: string,
     nftDescription: string,
     selectedFiles: FileInfo[],
   ) => {
@@ -790,7 +806,7 @@ export default function NFTMinter() {
       const metadata = {
         [selectedPolicy.policyId]: {
           [nftName]: {
-            name: nftName,
+            name: nftTitle,
             image: `ipfs://${thumbnailImage}`,
             mediaType: thumbnailMimeType,
             description: nftDescription,
@@ -913,8 +929,8 @@ export default function NFTMinter() {
 
       let message =
         selectedFiles.length > 1
-          ? 'Files uploaded successfully. Browse uploaded files to select them.'
-          : 'File uploaded successfully. Browse uploaded files to select it.'
+          ? 'Files uploaded successfully. Choose from the uploaded files to select them.'
+          : 'File uploaded successfully. Choose from the uploaded files to select it.'
 
       toast.success(message, {
         position: 'bottom-center',
@@ -1071,7 +1087,7 @@ export default function NFTMinter() {
       const allUTxOs = await lucid.utxosAt(address)
 
       if (allUTxOs.length > 32) {
-        toast.error('This wallet has a lot of utxos, this may take a few minutes', {
+        toast.error('This wallet has a lot of utxos, this could take a minute or two', {
           position: 'bottom-center',
         })
       }
@@ -1882,6 +1898,7 @@ export default function NFTMinter() {
               <Input
                 value={blockfrostKey || ''}
                 onChange={handleBlockfrostChange}
+                placeholder="Enter your Blockfrost Project ID"
                 className={`${!blockfrostKey ? 'border-red-500/50' : ''}`}
               />
               <Link
@@ -1898,6 +1915,7 @@ export default function NFTMinter() {
               <Input
                 value={pinataJWT || ''}
                 onChange={handleJWTChange}
+                placeholder="Enter your Pinata JWT"
                 className={`${!pinataJWT ? 'border-red-500/50' : ''}`}
               />
               <Link
@@ -1938,7 +1956,7 @@ export default function NFTMinter() {
                 {loadingFiles ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
-                  'Browse Uploaded Files'
+                  'Choose from Uploaded Files'
                 )}
               </Button3D>
               <span className="text-center text-sm text-muted-foreground md:text-base">or</span>
@@ -2484,18 +2502,38 @@ export default function NFTMinter() {
               {/* Existing input fields */}
               <div className="space-y-4">
                 <div className="space-y-1">
-                  <label htmlFor="nft-title" className="text-sm font-medium">
-                    NFT Title
+                  <label htmlFor="nft-name" className="text-sm font-medium">
+                    Asset Name
                   </label>
                   <Input
-                    id="nft-title"
+                    id="nft-name"
                     type="text"
-                    placeholder="Enter NFT title"
+                    placeholder="Enter a unique identifier for your NFT (e.g., MyCoolNFT001)"
                     value={nftName}
                     onChange={(e) => setNftName(e.target.value)}
                     autoFocus
                     className="w-full"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    This is the unique identifier for your NFT. Use only letters, numbers, and underscores.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="nft-title" className="text-sm font-medium">
+                    Display Name
+                  </label>
+                  <Input
+                    id="nft-title"
+                    type="text"
+                    placeholder="Enter a display name for your NFT (e.g., My Cool NFT #1)"
+                    value={nftTitle}
+                    onChange={(e) => setNftTitle(e.target.value)}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    This is the human-readable name that will be displayed in wallets and marketplaces.
+                  </p>
                 </div>
 
                 <div className="space-y-1">
@@ -2505,29 +2543,92 @@ export default function NFTMinter() {
                   <Input
                     id="nft-description"
                     type="text"
-                    placeholder="Enter NFT description"
+                    placeholder="Describe your NFT (e.g., A unique digital artwork created in 2024)"
                     value={nftDescription}
                     onChange={(e) => setNftDescription(e.target.value)}
                     className="w-full"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Provide a brief description of your NFT that helps collectors understand its value.
+                  </p>
                 </div>
+              </div>
 
-                {/* Metadata Editor Section */}
+              {/* Metadata Editor Section */}
+              <div className="space-y-2">
                 <div className="space-y-2">
-                  <div className="space-y-2">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex gap-2 flex-row items-center">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex gap-2 flex-row items-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1.5"
+                        onClick={() => {
+                          // Convert current metadata to pool.pm format
+                          const currentMetadata = {
+                            "721": {
+                              [selectedPolicy.policyId]: {
+                                [nftName || '<asset_name>']: {
+                                  name: nftTitle || '<name>',
+                                  image: thumbnailImage ? `ipfs://${thumbnailImage}` : '[preview image]',
+                                  mediaType: thumbnailImage?.toLowerCase().endsWith('.gif') ? 'image/gif' : 'image/png',
+                                  description: nftDescription || '[description]',
+                                  files: selectedFiles.map((file) => ({
+                                    name: file.customName || file.name,
+                                    mediaType: file.name.toLowerCase().endsWith('.gif') ? 'image/gif' : 'image/png',
+                                    src: `ipfs://${file.url}`,
+                                    ...(file.properties && Object.keys(file.properties).length > 0
+                                      ? file.properties
+                                      : {}),
+                                  })),
+                                },
+                              },
+                            }
+                          }
+
+                          // Extract the NFT data
+                          const metadata = currentMetadata as { "721": Record<string, Record<string, any>> };
+                          const policyId = Object.keys(metadata["721"])[0];
+                          const nftKey = Object.keys(metadata["721"][policyId])[0];
+                          const nftData = metadata["721"][policyId][nftKey];
+
+                          // Create pool.pm format
+                          const poolMetadata = {
+                            "721": {
+                              [policyId]: {
+                                [nftKey]: {
+                                  name: nftData.name,
+                                  image: nftData.image,
+                                  mediaType: nftData.mediaType,
+                                  ...(nftData.description && { description: nftData.description }),
+                                  ...(nftData.files && { files: nftData.files })
+                                }
+                              }
+                            }
+                          }
+
+                          // Encode the metadata for the URL
+                          const encodedMetadata = encodeURIComponent(JSON.stringify(poolMetadata))
+
+                          // Open pool.pm in a new tab
+                          window.open(`https://pool.pm/test/metadata?metadata=${encodedMetadata}`, '_blank')
+                        }}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        <span className="text-sm">Preview</span>
+                        <Image src={poolPmIco} alt='pool.pm' width={16} height={16} />
+                      </Button>
+                      <div className="flex items-center gap-2">
                         <Button
                           variant="outline"
                           size="sm"
                           className="h-7 gap-1.5"
                           onClick={() => {
-                            // Convert current metadata to pool.pm format
-                            const currentMetadata = {
+                            const metadata = JSON.stringify({
                               "721": {
                                 [selectedPolicy.policyId]: {
-                                  [nftName || '[title]']: {
-                                    name: nftName || '[title]',
+                                  [nftName || '<asset_name>']: {
+                                    name: nftTitle || '<name>',
                                     image: thumbnailImage ? `ipfs://${thumbnailImage}` : '[preview image]',
                                     mediaType: thumbnailImage?.toLowerCase().endsWith('.gif') ? 'image/gif' : 'image/png',
                                     description: nftDescription || '[description]',
@@ -2542,177 +2643,106 @@ export default function NFTMinter() {
                                   },
                                 },
                               }
-                            }
-
-                            // Extract the NFT data
-                            const metadata = currentMetadata as { "721": Record<string, Record<string, any>> };
-                            const policyId = Object.keys(metadata["721"])[0];
-                            const nftKey = Object.keys(metadata["721"][policyId])[0];
-                            const nftData = metadata["721"][policyId][nftKey];
-
-                            // Create pool.pm format
-                            const poolMetadata = {
-                              "721": {
-                                [policyId]: {
-                                  [nftKey]: {
-                                    name: nftData.name,
-                                    image: nftData.image,
-                                    mediaType: nftData.mediaType,
-                                    ...(nftData.description && { description: nftData.description }),
-                                    ...(nftData.files && { files: nftData.files })
-                                  }
-                                }
-                              }
-                            }
-
-                            // Encode the metadata for the URL
-                            const encodedMetadata = encodeURIComponent(JSON.stringify(poolMetadata))
-
-                            // Open pool.pm in a new tab
-                            window.open(`https://pool.pm/test/metadata?metadata=${encodedMetadata}`, '_blank')
+                            }, null, 2)
+                            navigator.clipboard.writeText(metadata)
+                            toast.success('Metadata copied to clipboard', { position: 'bottom-center' })
                           }}
                         >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          <span className="text-sm">Preview</span>
-                          <Image src={poolPmIco} alt='pool.pm' width={16} height={16} />
+                          <Copy className="h-3.5 w-3.5" />
+                          <span className="text-sm">Copy</span>
                         </Button>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 gap-1.5"
-                            onClick={() => {
-                              const metadata = JSON.stringify({
-                                "721": {
-                                  [selectedPolicy.policyId]: {
-                                    [nftName || '[title]']: {
-                                      name: nftName || '[title]',
-                                      image: thumbnailImage ? `ipfs://${thumbnailImage}` : '[preview image]',
-                                      mediaType: thumbnailImage?.toLowerCase().endsWith('.gif') ? 'image/gif' : 'image/png',
-                                      description: nftDescription || '[description]',
-                                      files: selectedFiles.map((file) => ({
-                                        name: file.customName || file.name,
-                                        mediaType: file.name.toLowerCase().endsWith('.gif') ? 'image/gif' : 'image/png',
-                                        src: `ipfs://${file.url}`,
-                                        ...(file.properties && Object.keys(file.properties).length > 0
-                                          ? file.properties
-                                          : {}),
-                                      })),
-                                    },
-                                  },
-                                }
-                              }, null, 2)
-                              navigator.clipboard.writeText(metadata)
-                              toast.success('Metadata copied to clipboard', { position: 'bottom-center' })
-                            }}
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                            <span className="text-sm">Copy</span>
-                          </Button>
-                        </div>
                       </div>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Metadata Preview</label>
-                      <div className="rounded-lg border border-border">
-                        <SyntaxHighlighter
-                          language="json"
-                          style={oneDark}
-                          customStyle={{
-                            margin: 0,
-                            fontSize: '0.85rem',
-                            padding: '1rem',
-                          }}
-                        >
-                          {JSON.stringify(
-                            {
-                              "721": {
-                                [selectedPolicy?.policyId || '']: {
-                                  [nftName]: {
-                                    name: nftName,
-                                    image: `ipfs://${thumbnailImage}`,
-                                    mediaType: thumbnailImage ? VALID_IMAGE_MIMES[`.${selectedFiles.find(f => f.url === thumbnailImage)?.name.split('.').pop()!.toLowerCase()}`] : '',
-                                    description: nftDescription,
-                                    files: selectedFiles.map(file => ({
-                                      name: file.customName || file.name,
-                                      mediaType: VALID_IMAGE_MIMES[`.${file.name.split('.').pop()!.toLowerCase()}`],
-                                      src: `ipfs://${file.url}`,
-                                      ...(file.properties || {})
-                                    }))
-                                  }
-                                }
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Metadata Preview</label>
+                    <div className="rounded-lg border border-border">
+                      <JsonPreview
+                        data={{
+                          "721": {
+                            [selectedPolicy?.policyId || '']: {
+                              [nftName || '<asset_name>']: {
+                                name: nftTitle || '<name>',
+                                image: `ipfs://${thumbnailImage}`,
+                                mediaType: thumbnailImage ? VALID_IMAGE_MIMES[`.${selectedFiles.find(f => f.url === thumbnailImage)?.name.split('.').pop()!.toLowerCase()}`] : '',
+                                description: nftDescription,
+                                files: selectedFiles.map(file => ({
+                                  name: file.customName || file.name,
+                                  mediaType: VALID_IMAGE_MIMES[`.${file.name.split('.').pop()!.toLowerCase()}`],
+                                  src: `ipfs://${file.url}`,
+                                  ...(file.properties || {})
+                                }))
                               }
-                            },
-                            null,
-                            2
-                          )}
-                        </SyntaxHighlighter>
-                      </div>
+                            }
+                          }
+                        }}
+                      />
                     </div>
                   </div>
+                </div>
 
-                  {/* Quantity input and warning */}
-                  <div className="space-y-1">
-                    <label htmlFor="mint-quantity" className="text-sm font-medium">
-                      Quantity to Mint
-                    </label>
-                    <Input
-                      id="mint-quantity"
-                      type="number"
-                      min="1"
-                      max="42069"
-                      value={mintQuantity}
-                      onChange={(e) => {
-                        const value = e.target.value === '' ? '' : parseInt(e.target.value)
-                        if (value === '' || (!isNaN(value) && value >= 0 && value <= 42069)) {
-                          setMintQuantity(value as number)
-                        }
-                      }}
-                      onBlur={(e) => {
-                        const value = parseInt(e.target.value)
-                        if (isNaN(value) || value < 1) {
-                          setMintQuantity(1)
-                        }
-                      }}
-                      className={`w-full ${mintQuantity > 1 ? 'border-yellow-500' : 'border-border'}`}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Enter a number between 1 and 42069
-                    </p>
-
-                    {mintQuantity > 1 && (
-                      <div className="mt-2 flex items-center gap-2 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-3 text-sm text-yellow-500">
-                        <AlertCircle className="h-4 w-4" />
-                        <span>
-                          Warning: Minting multiple copies will create a Fungible Token (FT) instead
-                          of a Non-Fungible Token (NFT). Each copy will be identical and
-                          interchangeable.
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Mint button */}
-                  <Button3D
-                    disabled={!isStepComplete(4) || minting || !walletState.api}
-                    onClick={() => {
-                      if (walletState.api && nftName && nftDescription && selectedFiles.length > 0) {
-                        mintNFT(lucid, selectedPolicy, nftName, nftDescription, selectedFiles)
-                      } else {
-                        if (!nftName || !nftDescription) {
-                          toast.error('NFT name and description must be provided', {
-                            position: 'bottom-center',
-                          })
-                        } else {
-                          toast.error('Wallet not connected', { position: 'bottom-center' })
-                        }
+                {/* Quantity input and warning */}
+                <div className="space-y-1">
+                  <label htmlFor="mint-quantity" className="text-sm font-medium">
+                    Quantity to Mint
+                  </label>
+                  <Input
+                    id="mint-quantity"
+                    type="number"
+                    min="1"
+                    max="42069"
+                    value={mintQuantity}
+                    onChange={(e) => {
+                      const value = e.target.value === '' ? '' : parseInt(e.target.value)
+                      if (value === '' || (!isNaN(value) && value >= 0 && value <= 42069)) {
+                        setMintQuantity(value as number)
                       }
                     }}
-                    className="w-full"
-                  >
-                    {minting ? 'Minting...' : 'Mint NFT'}
-                  </Button3D>
+                    onBlur={(e) => {
+                      const value = parseInt(e.target.value)
+                      if (isNaN(value) || value < 1) {
+                        setMintQuantity(1)
+                      }
+                    }}
+                    placeholder="Enter number of copies to mint (1-42069)"
+                    className={`w-full ${mintQuantity > 1 ? 'border-yellow-500' : 'border-border'}`}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Enter a number between 1 and 42069. Minting more than 1 copy will create a Fungible Token (FT).
+                  </p>
+
+                  {mintQuantity > 1 && (
+                    <div className="mt-2 flex items-center gap-2 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-3 text-sm text-yellow-500">
+                      <AlertCircle className="h-4 w-4" />
+                      <span>
+                        Warning: Minting multiple copies will create a Fungible Token (FT) instead
+                        of a Non-Fungible Token (NFT). Each copy will be identical and
+                        interchangeable.
+                      </span>
+                    </div>
+                  )}
                 </div>
+
+                {/* Mint button */}
+                <Button3D
+                  disabled={!isStepComplete(4) || minting || !walletState.api}
+                  onClick={() => {
+                    if (walletState.api && nftName && nftTitle && nftDescription && selectedFiles.length > 0) {
+                      mintNFT(lucid, selectedPolicy, nftName, nftTitle, nftDescription, selectedFiles)
+                    } else {
+                      if (!nftName || !nftTitle || !nftDescription) {
+                        toast.error('NFT name, title, and description must be provided', {
+                          position: 'bottom-center',
+                        })
+                      } else {
+                        toast.error('Wallet not connected', { position: 'bottom-center' })
+                      }
+                    }
+                  }}
+                  className="w-full"
+                >
+                  {minting ? 'Minting...' : 'Mint NFT'}
+                </Button3D>
               </div>
             </div>
           </CollapsibleContent>
