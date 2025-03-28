@@ -63,10 +63,10 @@ const PrismData = () => {
         for (const mutation of mutationsList) {
             if (mutation.type === "childList") {
                 const overlapManager = document.querySelector(
-                    "#overlap-manager-root > div:nth-child(2)"
+                    "#overlap-manager-root > div:nth-child(3)"
                 );
                 const goPro = document.querySelector(
-                    "#overlap-manager-root > div:nth-child(2) > div"
+                    "#overlap-manager-root > div:nth-child(3) > div"
                 );
                 const span = document.querySelector(
                     "#overlap-manager-root > div:nth-child(4) > div"
