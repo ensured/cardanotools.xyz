@@ -89,6 +89,7 @@ interface Comment {
   content: string
   createdBy: string
   createdAt: number
+  updatedAt?: number
 }
 
 interface LikeStatus {
@@ -230,6 +231,8 @@ export default function Map() {
     name: string
   } | null>(null)
   const [meetups, setMeetups] = useState<any[]>([])
+  const [editingComment, setEditingComment] = useState<{ id: string; content: string } | null>(null)
+  const [isEditingComment, setIsEditingComment] = useState(false)
 
   useEffect(() => {
     if ('geolocation' in navigator) {
@@ -911,6 +914,41 @@ export default function Map() {
     )
   }
 
+  const handleEditComment = async (spotId: string, commentId: string) => {
+    if (!editingComment || !editingComment.content.trim()) return
+
+    setIsEditingComment(true)
+    try {
+      const response = await fetch(`/api/points/${spotId}/comments`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          commentId,
+          content: editingComment.content,
+        }),
+      })
+
+      if (response.ok) {
+        const updatedComment = await response.json()
+        setComments((prev) => ({
+          ...prev,
+          [spotId]: prev[spotId].map((c) => (c.id === commentId ? updatedComment : c)),
+        }))
+        setEditingComment(null)
+        toast.success('Comment updated successfully')
+      } else {
+        toast.error('Failed to update comment')
+      }
+    } catch (error) {
+      console.error('Error updating comment:', error)
+      toast.error('An error occurred while updating the comment')
+    } finally {
+      setIsEditingComment(false)
+    }
+  }
+
   if (!isLoaded) {
     return <div>Loading...</div>
   }
@@ -1297,24 +1335,85 @@ export default function Map() {
                         comments[selectedSpotId]?.map((comment) => (
                           <div key={comment.id} className="mb-4 border-b pb-4 last:border-0">
                             <div className="flex items-start justify-between">
-                              <p className="text-gray-700">{comment.content}</p>
+                              {editingComment?.id === comment.id ? (
+                                <div className="flex-1 space-y-2">
+                                  <Textarea
+                                    value={editingComment.content}
+                                    onChange={(e) =>
+                                      setEditingComment((prev) =>
+                                        prev ? { ...prev, content: e.target.value } : null,
+                                      )
+                                    }
+                                    className="min-h-[100px]"
+                                    disabled={isEditingComment}
+                                  />
+                                  <div className="flex gap-2">
+                                    <Button
+                                      size="sm"
+                                      onClick={() =>
+                                        selectedSpotId &&
+                                        handleEditComment(selectedSpotId, comment.id)
+                                      }
+                                      disabled={!editingComment.content.trim() || isEditingComment}
+                                    >
+                                      {isEditingComment ? (
+                                        <>
+                                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                          Saving...
+                                        </>
+                                      ) : (
+                                        'Save'
+                                      )}
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => setEditingComment(null)}
+                                      disabled={isEditingComment}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-gray-700">{comment.content}</p>
+                              )}
                               {(comment.createdBy === user.primaryEmailAddress?.emailAddress ||
                                 isAdmin) && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-red-500 hover:text-red-700"
-                                  onClick={() =>
-                                    selectedSpotId &&
-                                    handleDeleteComment(selectedSpotId, comment.id)
-                                  }
-                                >
-                                  Delete
-                                </Button>
+                                <div className="flex gap-2">
+                                  {editingComment?.id !== comment.id && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-blue-500 hover:text-blue-700"
+                                      onClick={() =>
+                                        setEditingComment({
+                                          id: comment.id,
+                                          content: comment.content,
+                                        })
+                                      }
+                                    >
+                                      Edit
+                                    </Button>
+                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-red-500 hover:text-red-700"
+                                    onClick={() =>
+                                      selectedSpotId &&
+                                      handleDeleteComment(selectedSpotId, comment.id)
+                                    }
+                                  >
+                                    Delete
+                                  </Button>
+                                </div>
                               )}
                             </div>
                             <p className="mt-1 text-xs text-gray-500">
-                              {formatDistanceToNow(comment.createdAt, { addSuffix: true })}
+                              {comment.updatedAt
+                                ? `Updated ${formatDistanceToNow(comment.updatedAt, { addSuffix: true })}`
+                                : `Posted ${formatDistanceToNow(comment.createdAt, { addSuffix: true })}`}
                             </p>
                           </div>
                         ))}
