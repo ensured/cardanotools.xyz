@@ -1,34 +1,33 @@
 /* eslint-disable tailwindcss/classnames-order */
-"use client"
+'use client'
 
-import React, { useCallback, useEffect, useRef, useState } from "react"
-import { useResizeObserver } from "@wojtekmaj/react-hooks"
-import { jsPDF } from "jspdf"
-import { Document, Page } from "react-pdf"
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useResizeObserver } from '@wojtekmaj/react-hooks'
+import { jsPDF } from 'jspdf'
+import { Document, Page } from 'react-pdf'
 import { pdfjs } from 'react-pdf'
 
-import "./PdfViewer.css"
-import "../node_modules/react-pdf/dist/esm/Page/AnnotationLayer.css"
-import "../node_modules/react-pdf/dist/esm/Page/TextLayer.css"
-import { useWindowSize } from "@uidotdev/usehooks"
-import { DownloadIcon, X } from "lucide-react"
-import type { PDFDocumentProxy } from "pdfjs-dist"
-import { File } from "react-pdf/dist/cjs/shared/types"
+import './PdfViewer.css'
+import '../node_modules/react-pdf/dist/esm/Page/AnnotationLayer.css'
+import '../node_modules/react-pdf/dist/esm/Page/TextLayer.css'
+import { useWindowSize } from '@uidotdev/usehooks'
+import { DownloadIcon, X } from 'lucide-react'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
 
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 
-import { Button } from "./ui/button"
-import { Input } from "./ui/input"
+import { Button } from './ui/button'
+import { Input } from './ui/input'
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-	'pdfjs-dist/build/pdf.worker.min.mjs',
-	import.meta.url,
-  ).toString();
-  
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString()
+
 const options = {
-  cMapUrl: "/cmaps/",
-  standardFontDataUrl: "/standard_fonts/",
+  cMapUrl: '/cmaps/',
+  standardFontDataUrl: '/standard_fonts/',
 }
 
 const resizeObserverOptions = {}
@@ -40,7 +39,7 @@ async function processBatch(
   batchSize: number,
   numPages: number | undefined,
   doc: jsPDF,
-  totalBatches: number
+  totalBatches: number,
 ) {
   const startPage = batchIndex * batchSize + 1
   const endPage = Math.min((batchIndex + 1) * batchSize, numPages ?? 0)
@@ -50,11 +49,11 @@ async function processBatch(
     if (canvas instanceof HTMLCanvasElement) {
       doc.addImage(
         canvas,
-        "canvas",
+        'canvas',
         0,
         0,
         doc.internal.pageSize.getWidth(),
-        doc.internal.pageSize.getHeight()
+        doc.internal.pageSize.getHeight(),
       )
     } else {
       console.error(`Canvas not found for page ${i}`)
@@ -73,8 +72,8 @@ async function processBatch(
 
 // Add these new props to the component
 interface PDFViewerProps {
-  inputFile: File | null;
-  onProgress?: (progress: number) => void;
+  inputFile: File | null
+  onProgress?: (progress: number) => void
 }
 
 export default function PDFViewer({ inputFile, onProgress }: PDFViewerProps) {
@@ -82,7 +81,7 @@ export default function PDFViewer({ inputFile, onProgress }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>()
   const [containerRef, setContainerRef] = useState<HTMLElement | null>(null)
   const [containerWidth, setContainerWidth] = useState<number>()
-  const [filename, setFilename] = useState("")
+  const [filename, setFilename] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const [isSwitchChecked, setIsSwitchChecked] = useState(false)
   const [isContainerDivHidden, setIsContainerDivHidden] = useState(true)
@@ -91,13 +90,10 @@ export default function PDFViewer({ inputFile, onProgress }: PDFViewerProps) {
   const moveCursor = useCallback(async () => {
     if (inputRef.current) {
       const inputLength = filename.length
-      const pdfIndex = filename.lastIndexOf(".pdf")
+      const pdfIndex = filename.lastIndexOf('.pdf')
 
       if (pdfIndex !== -1) {
-        const cursorPosition = Math.min(
-          inputRef.current.selectionStart ?? inputLength,
-          pdfIndex
-        )
+        const cursorPosition = Math.min(inputRef.current.selectionStart ?? inputLength, pdfIndex)
         inputRef.current.setSelectionRange(cursorPosition, cursorPosition)
       }
     }
@@ -159,29 +155,24 @@ export default function PDFViewer({ inputFile, onProgress }: PDFViewerProps) {
     return () => observer.disconnect()
   }, [moveCursor])
 
-
   const handleHideDiv = (opt: boolean) => setIsContainerDivHidden(opt)
 
   if (!size.width || !size.height) return null
 
   return (
-    <div
-      aria-hidden={isContainerDivHidden}
-      className={`${isContainerDivHidden ? "hidden" : ""}`}
-    >
-      <label htmlFor="file"></label>{" "}
-      <input onChange={onFileChange} type="file" hidden />
+    <div aria-hidden={isContainerDivHidden} className={`${isContainerDivHidden ? 'hidden' : ''}`}>
+      <label htmlFor="file"></label> <input onChange={onFileChange} type="file" hidden />
       <div
         ref={setContainerRef}
         className={`absolute inset-x-0 top-0 z-40 border-border shadow-md ${
-          file ? "rounded-sm border bg-background p-2" : ""
+          file ? 'rounded-sm border bg-background p-2' : ''
         }`}
       >
         {!file ||
           (file !== null && (
-            <div className="mb-2 flex flex-wrap flex-row items-center justify-between pb-1">
+            <div className="mb-2 flex flex-row flex-wrap items-center justify-between pb-1">
               <div className="flex w-full flex-wrap gap-2 p-1">
-                <h1 className="text-xl font-semibold" >Pdf Preview</h1>
+                <h1 className="text-xl font-semibold">Pdf Preview</h1>
                 <div className="flex w-full items-center justify-center">
                   <Button
                     className="absolute right-2 top-2"
@@ -192,21 +183,13 @@ export default function PDFViewer({ inputFile, onProgress }: PDFViewerProps) {
                       }
                     }}
                   >
-                    <X
-                      size={size.width < 520 ? 20 : size.width < 840 ? 28 : 36}
-                      className=""
-                    />
+                    <X size={size.width < 520 ? 20 : size.width < 840 ? 28 : 36} className="" />
                   </Button>
                 </div>
               </div>
             </div>
           ))}
-        <Document
-          file={file}
-          noData={""}
-          onLoadSuccess={onDocumentLoadSuccess}
-          options={options}
-        >
+        <Document file={file} noData={''} onLoadSuccess={onDocumentLoadSuccess} options={options}>
           {numPages !== undefined &&
             Array.from(new Array(numPages), (el, index) => (
               <Page

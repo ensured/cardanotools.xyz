@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { kv } from '@vercel/kv'
 import { isAdmin } from '@/lib/admin'
@@ -24,10 +24,10 @@ interface EditProposal {
   adminNotes?: string
 }
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
-    const { id } = await params
+    const params = await context.params
 
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
 
     // Check if spot exists
-    const spot = await kv.get<MapPoint>(`point:${id}`)
+    const spot = await kv.get<MapPoint>(`point:${params.id}`)
     if (!spot) {
       return new NextResponse('Spot not found', { status: 404 })
     }
@@ -57,7 +57,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     // Create proposal
     const proposal: EditProposal = {
       id: Date.now().toString(),
-      spotId: id,
+      spotId: params.id,
       userId,
       userEmail,
       proposedName,
@@ -68,7 +68,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
 
     // Store proposal
-    await kv.lpush(`proposals:${id}`, proposal)
+    await kv.lpush(`proposals:${params.id}`, proposal)
 
     return NextResponse.json(proposal)
   } catch (error) {
@@ -77,17 +77,17 @@ export async function POST(request: Request, { params }: { params: { id: string 
   }
 }
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
-    const { id } = await params
+    const params = await context.params
 
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
     // Get all proposals for this spot
-    const proposals = await kv.lrange(`proposals:${id}`, 0, -1)
+    const proposals = await kv.lrange(`proposals:${params.id}`, 0, -1)
 
     return NextResponse.json(proposals)
   } catch (error) {
@@ -96,7 +96,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   }
 }
 
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
     if (!userId || !(await isAdmin())) {
@@ -104,6 +104,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     }
 
     const { proposalId, status, adminNotes } = await request.json()
+    const params = await context.params
     const id = await params.id
     const key = `proposals:${id}`
 

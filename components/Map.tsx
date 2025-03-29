@@ -234,15 +234,40 @@ export default function Map() {
   const [editingComment, setEditingComment] = useState<{ id: string; content: string } | null>(null)
   const [isEditingComment, setIsEditingComment] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
+  const [mapKey, setMapKey] = useState(0)
 
   useEffect(() => {
-    setIsMounted(true)
+    // Only set mounted state if we're in the browser
+    if (typeof window !== 'undefined') {
+      setIsMounted(true)
+      // Generate a new key for the map container
+      setMapKey(Date.now())
+    }
+
     return () => {
+      // Cleanup function
       if (mapRef.current) {
         mapRef.current.remove()
       }
+      // Clean up any existing map instances
+      const mapContainer = document.querySelector('.leaflet-container')
+      if (mapContainer) {
+        mapContainer.innerHTML = ''
+      }
+      // Reset mounted state
+      setIsMounted(false)
     }
   }, [])
+
+  // Add a separate effect for map initialization
+  useEffect(() => {
+    if (isMounted && mapRef.current) {
+      // Force a map resize when mounted
+      setTimeout(() => {
+        mapRef.current?.invalidateSize()
+      }, 100)
+    }
+  }, [isMounted])
 
   useEffect(() => {
     if ('geolocation' in navigator) {
@@ -1058,7 +1083,7 @@ export default function Map() {
       {/* Map container */}
       <div className="w-full flex-1">
         <MapContainer
-          key={`map-${isMounted}`}
+          key={`map-${mapKey}`}
           center={userLocation || [0, 0]}
           zoom={zoom}
           className="h-full w-full"

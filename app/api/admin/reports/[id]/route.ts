@@ -1,7 +1,6 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { kv } from '@vercel/kv'
-import { isAdmin } from '@/lib/admin'
 
 interface Report {
   id: string
@@ -11,21 +10,16 @@ interface Report {
   status: 'pending' | 'reviewed' | 'resolved'
 }
 
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
-
-    // Only allow admin access
-    if (!userId || !(await isAdmin())) {
+    if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    const { id } = params
-    const { status } = await request.json()
-
-    if (!status || !['reviewed', 'resolved'].includes(status)) {
-      return new NextResponse('Invalid status', { status: 400 })
-    }
+    const params = await context.params
+    const body = await request.json()
+    const { status } = body
 
     // Get all points
     const points = await kv.keys('point:*')
@@ -37,7 +31,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       const reports = (await kv.get<Report[]>(`reports:${pointId}`)) || []
 
       const updatedReports = reports.map((report) => {
-        if (report.id === id) {
+        if (report.id === params.id) {
           reportFound = true
           return { ...report, status }
         }
@@ -56,7 +50,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     return new NextResponse(null, { status: 204 })
   } catch (error) {
-    console.error('Error updating report:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('[REPORT_PATCH]', error)
+    return new NextResponse('Internal Error', { status: 500 })
   }
 }

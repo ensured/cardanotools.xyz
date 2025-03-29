@@ -11,10 +11,10 @@ interface MapPoint {
   createdBy: string
 }
 
-export async function DELETE(request: Request, { params }: { params: { id: string } }) {
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
-    const { id } = await params
+    const params = await context.params
 
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
@@ -28,7 +28,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     }
 
     // Get the point to check ownership
-    const point = await kv.get<MapPoint>(`point:${id}`)
+    const point = await kv.get<MapPoint>(`point:${params.id}`)
 
     if (!point) {
       return new NextResponse('Point not found', { status: 404 })
@@ -40,7 +40,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     }
 
     // Delete the point
-    await kv.del(`point:${id}`)
+    await kv.del(`point:${params.id}`)
 
     return new NextResponse(null, { status: 204 })
   } catch (error) {

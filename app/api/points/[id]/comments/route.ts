@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { kv } from '@vercel/kv'
 import { isAdmin } from '@/lib/admin'
@@ -19,21 +19,21 @@ interface MapPoint {
   createdBy: string
 }
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params
-    const comments = (await kv.get<Comment[]>(`comments:${id}`)) || []
+    const params = await context.params
+    const comments = (await kv.get<Comment[]>(`comments:${params.id}`)) || []
     return NextResponse.json(comments)
   } catch (error) {
-    console.error('Error fetching comments:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('[COMMENTS_GET]', error)
+    return new NextResponse('Internal Error', { status: 500 })
   }
 }
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
-    const { id } = await params
+    const params = await context.params
 
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
@@ -53,7 +53,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
 
     // Check if the spot exists
-    const spot = await kv.get<MapPoint>(`point:${id}`)
+    const spot = await kv.get<MapPoint>(`point:${params.id}`)
     if (!spot) {
       return new NextResponse('Spot not found', { status: 404 })
     }
@@ -66,23 +66,23 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
 
     // Get existing comments and add the new one
-    const comments = (await kv.get<Comment[]>(`comments:${id}`)) || []
+    const comments = (await kv.get<Comment[]>(`comments:${params.id}`)) || []
     comments.push(newComment)
 
     // Store updated comments
-    await kv.set(`comments:${id}`, comments)
+    await kv.set(`comments:${params.id}`, comments)
 
     return NextResponse.json(newComment)
   } catch (error) {
-    console.error('Error creating comment:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('[COMMENTS_POST]', error)
+    return new NextResponse('Internal Error', { status: 500 })
   }
 }
 
-export async function DELETE(request: Request, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
-    const { id } = await params
+    const params = await context.params
     const { commentId } = await request.json()
 
     if (!userId) {
@@ -97,12 +97,12 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
     }
 
     // Get the point and its comments
-    const point = await kv.get<MapPoint>(`point:${id}`)
+    const point = await kv.get<MapPoint>(`point:${params.id}`)
     if (!point) {
       return new NextResponse('Point not found', { status: 404 })
     }
 
-    const comments = (await kv.get<Comment[]>(`comments:${id}`)) || []
+    const comments = (await kv.get<Comment[]>(`comments:${params.id}`)) || []
     const commentIndex = comments.findIndex((c) => c.id === commentId)
 
     if (commentIndex === -1) {
@@ -116,19 +116,19 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
 
     // Remove the comment
     comments.splice(commentIndex, 1)
-    await kv.set(`comments:${id}`, comments)
+    await kv.set(`comments:${params.id}`, comments)
 
     return new NextResponse(null, { status: 204 })
   } catch (error) {
-    console.error('Error deleting comment:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('[COMMENTS_DELETE]', error)
+    return new NextResponse('Internal Error', { status: 500 })
   }
 }
 
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
-    const { id } = await params
+    const params = await context.params
     const { commentId, content } = await request.json()
 
     if (!userId) {
@@ -147,12 +147,12 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     }
 
     // Get the point and its comments
-    const point = await kv.get<MapPoint>(`point:${id}`)
+    const point = await kv.get<MapPoint>(`point:${params.id}`)
     if (!point) {
       return new NextResponse('Point not found', { status: 404 })
     }
 
-    const comments = (await kv.get<Comment[]>(`comments:${id}`)) || []
+    const comments = (await kv.get<Comment[]>(`comments:${params.id}`)) || []
     const commentIndex = comments.findIndex((c) => c.id === commentId)
 
     if (commentIndex === -1) {
@@ -171,11 +171,11 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       updatedAt: Date.now(),
     }
 
-    await kv.set(`comments:${id}`, comments)
+    await kv.set(`comments:${params.id}`, comments)
 
     return NextResponse.json(comments[commentIndex])
   } catch (error) {
-    console.error('Error updating comment:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('[COMMENTS_PATCH]', error)
+    return new NextResponse('Internal Error', { status: 500 })
   }
 }
