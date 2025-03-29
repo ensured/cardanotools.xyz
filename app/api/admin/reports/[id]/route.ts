@@ -11,10 +11,7 @@ interface Report {
   status: 'pending' | 'reviewed' | 'resolved'
 }
 
-export async function PATCH(
-  request: Request,
-  context: { params: { id: string } }
-) {
+export async function PATCH(request: Request, { params }: { params: { id: string } }) {
   try {
     const { userId } = await auth()
 
@@ -23,7 +20,7 @@ export async function PATCH(
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    const { id } = context.params
+    const { id } = params
     const { status } = await request.json()
 
     if (!status || !['reviewed', 'resolved'].includes(status)) {
