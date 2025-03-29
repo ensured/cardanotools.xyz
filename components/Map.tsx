@@ -13,7 +13,13 @@ import {
 } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import '@/styles/map.css'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,7 +35,14 @@ import L from 'leaflet'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { formatDistanceToNow } from 'date-fns'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardFooter,
+  CardDescription,
+} from '@/components/ui/card'
 import {
   Loader2,
   ThumbsUp,
@@ -39,6 +52,10 @@ import {
   Edit,
   Maximize2,
   Minimize2,
+  Shield,
+  X,
+  Users,
+  Calendar,
 } from 'lucide-react'
 import { useAdmin } from '@/lib/hooks/useAdmin'
 import { importSpots } from '@/app/actions/importSpots'
@@ -49,6 +66,7 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
+  CommandList,
 } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
@@ -137,6 +155,18 @@ interface EditProposal {
   currentType: 'street' | 'park' | 'diy'
 }
 
+interface NearbyMeetup {
+  id: string
+  title: string
+  description: string
+  date: number
+  spotId: string
+  spotName: string
+  createdBy: string
+  coordinates: [number, number]
+  distance: number
+}
+
 // Component to handle map center updates
 function ChangeView({ center, zoom }: { center: [number, number]; zoom: number }) {
   const map = useMap()
@@ -149,14 +179,15 @@ function ChangeView({ center, zoom }: { center: [number, number]; zoom: number }
 function LocationMarker({ onLocationSelect }: LocationMarkerProps) {
   useMapEvents({
     click(e: L.LeafletMouseEvent) {
-      // Check if click is on a control element, popup, location display, or search results
+      // Check if click is on a control element, popup, location display, search results, or any button
       const target = e.originalEvent.target as HTMLElement
       if (
         !document.querySelector('.leaflet-popup') &&
         !target.closest('.leaflet-control') &&
         !target.closest('.leaflet-bar') &&
         !target.closest('.location-display') &&
-        !target.closest('.cmdk-list') // Add this to prevent clicks on search results
+        !target.closest('.cmdk-list') && // Add this to prevent clicks on search results
+        !target.closest('button') // Add this to prevent clicks on any button
       ) {
         onLocationSelect(e.latlng.lat, e.latlng.lng)
       }
@@ -235,6 +266,12 @@ export default function Map() {
   const [isEditingComment, setIsEditingComment] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
   const [mapKey, setMapKey] = useState(0)
+  const [showWelcomeMessage, setShowWelcomeMessage] = useState(true)
+  const [isDenyingAll, setIsDenyingAll] = useState(false)
+  const [showNearbySessions, setShowNearbySessions] = useState(false)
+  const [nearbySessions, setNearbySessions] = useState<NearbyMeetup[]>([])
+  const [isLoadingNearbySessions, setIsLoadingNearbySessions] = useState(false)
+  const [isNearbySessionsDialogOpen, setIsNearbySessionsDialogOpen] = useState(false)
 
   useEffect(() => {
     // Only set mounted state if we're in the browser
@@ -333,6 +370,14 @@ export default function Map() {
   const handleLocationSelect = (lat: number, lon: number) => {
     setSelectedLocation({ lat, lng: lon })
     setIsDialogOpen(true)
+  }
+
+  // Add new function for handling search result selection
+  const handleSearchResultSelect = (lat: number, lon: number) => {
+    setUserLocation([lat, lon])
+    setZoom(13) // Zoom in to city level
+    setOpen(false) // Close the search dropdown
+    setSearchQuery('') // Clear the search query
   }
 
   const handleAddPoint = async () => {
@@ -625,6 +670,12 @@ export default function Map() {
       })
 
       if (response.ok) {
+        const newReport = await response.json()
+        // Update the local reports state
+        setReports((prev) => ({
+          ...prev,
+          [spotToReport]: [...(prev[spotToReport] || []), newReport],
+        }))
         setIsReportDialogOpen(false)
         setReportReason('')
         setSpotToReport(null)
@@ -718,13 +769,10 @@ export default function Map() {
     }
   }
 
-  const handleUpdateReportStatus = async (
-    reportId: string,
-    newStatus: 'pending' | 'reviewed' | 'resolved',
-  ) => {
+  const handleUpdateReportStatus = async (reportId: string, newStatus: 'accept' | 'deny') => {
     setIsUpdatingReport((prev) => ({ ...prev, [reportId]: true }))
     try {
-      const response = await fetch(`/api/points/${reportId}/report`, {
+      const response = await fetch(`/api/admin/reports/${reportId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -732,18 +780,34 @@ export default function Map() {
         body: JSON.stringify({ status: newStatus }),
       })
 
-      if (response.ok) {
-        setAdminReports((prev) =>
-          prev.map((report) =>
-            report.id === reportId ? { ...report, status: newStatus } : report,
-          ),
-        )
-      } else {
-        toast.error('Failed to update report status')
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(errorText || 'Failed to update report status')
       }
+
+      // Get the report details before removing it
+      const report = adminReports.find((r) => r.id === reportId)
+      if (!report) throw new Error('Report not found')
+
+      // If accepted, remove the spot
+      if (newStatus === 'accept') {
+        // Remove the spot from the points list
+        setPoints((prev) => prev.filter((p) => p.id !== report.spotId))
+        toast.success('Spot removed successfully')
+      } else {
+        // Update the local reports state to remove the denied report
+        setReports((prev) => ({
+          ...prev,
+          [report.spotId]: prev[report.spotId]?.filter((r) => r.id !== reportId) || [],
+        }))
+        toast.success('Report denied')
+      }
+
+      // Refresh the admin reports list
+      await fetchAdminReports()
     } catch (error) {
       console.error('Error updating report status:', error)
-      toast.error('An error occurred while updating the report status')
+      toast.error(error instanceof Error ? error.message : 'Failed to update report status')
     } finally {
       setIsUpdatingReport((prev) => ({ ...prev, [reportId]: false }))
     }
@@ -935,7 +999,8 @@ export default function Map() {
             variant="outline"
             size="sm"
             className="flex-1"
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation()
               setSelectedSpotForMeetup({ id: point.id, name: point.name })
               setIsMeetupsListDialogOpen(true)
               // Fetch meetups for this spot
@@ -984,6 +1049,88 @@ export default function Map() {
     }
   }
 
+  // Add effect to check localStorage for welcome message preference
+  useEffect(() => {
+    const hasSeenWelcome = localStorage.getItem('hasSeenWelcome')
+    if (hasSeenWelcome === 'true') {
+      setShowWelcomeMessage(false)
+    }
+  }, [])
+
+  // Add function to handle welcome message dismissal
+  const handleDismissWelcome = () => {
+    setShowWelcomeMessage(false)
+    localStorage.setItem('hasSeenWelcome', 'true')
+  }
+
+  const handleDenyAllReports = async () => {
+    try {
+      setIsDenyingAll(true)
+      const response = await fetch('/api/admin/reports/deny-all', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to deny all reports')
+      }
+
+      // Refresh the reports list
+      const updatedReports = await fetch('/api/admin/reports').then((res) => res.json())
+      setAdminReports(updatedReports)
+      toast.success('All reports have been denied')
+    } catch (error) {
+      console.error('Error denying all reports:', error)
+      toast.error('Failed to deny all reports')
+    } finally {
+      setIsDenyingAll(false)
+    }
+  }
+
+  // Add function to fetch nearby sessions
+  const fetchNearbySessions = async () => {
+    if (!mapRef.current) return
+
+    // Don't fetch if zoomed out too far (zoom level less than 8)
+    if (mapRef.current.getZoom() < 8) {
+      setNearbySessions([])
+      return
+    }
+
+    setIsLoadingNearbySessions(true)
+    try {
+      const center = mapRef.current.getCenter()
+      const response = await fetch(
+        `/api/meetups/nearby?lat=${center.lat}&lng=${center.lng}&radius=50`,
+      )
+      if (response.ok) {
+        const data = await response.json()
+        setNearbySessions(data)
+      }
+    } catch (error) {
+      console.error('Error fetching nearby sessions:', error)
+    } finally {
+      setIsLoadingNearbySessions(false)
+    }
+  }
+
+  // Add effect to fetch nearby sessions when toggle is changed
+  useEffect(() => {
+    if (showNearbySessions) {
+      fetchNearbySessions()
+    } else {
+      setNearbySessions([])
+    }
+  }, [showNearbySessions])
+
+  // Update the marker color based on active sessions
+  const getMarkerColor = (point: MapPoint) => {
+    const hasActiveSession = nearbySessions.some((session) => session.spotId === point.id)
+    return hasActiveSession ? '#9333ea' : '#ef4444' // Purple for active sessions, red for others
+  }
+
   if (!isLoaded || !isMounted) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -999,57 +1146,56 @@ export default function Map() {
   return (
     <div className="flex h-screen flex-col">
       {/* Header Section */}
-      <div className="border-b bg-white/90 backdrop-blur-sm">
-        <div className="px-4 py-3">
-          <div className="mb-2 flex items-center justify-between">
-            <h1 className="text-xl font-bold">Skate Spot Map</h1>
+      <div className="sticky top-0 z-[9999] border-b shadow-sm backdrop-blur-sm">
+        <div className="container mx-auto px-2 py-1.5 sm:px-4 sm:py-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <div className="flex items-center gap-2">
-              <Popover open={open} onOpenChange={setOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={open}
-                    className="w-[200px] justify-start"
-                  >
-                    <Search className="mr-2 h-4 w-4" />
-                    {searchQuery || 'Search location...'}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[400px] p-0">
-                  <Command>
-                    <CommandInput
-                      placeholder="Search for a location..."
-                      value={searchQuery}
-                      onValueChange={setSearchQuery}
-                    />
-                    <CommandEmpty>No location found.</CommandEmpty>
-                    <CommandGroup>
-                      {isSearching ? (
-                        <div className="flex items-center justify-center py-4">
-                          <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-gray-900"></div>
-                        </div>
-                      ) : (
-                        searchResults.map((result) => (
-                          <CommandItem
-                            key={`${result.lat}-${result.lon}`}
-                            value={result.display_name}
-                            onSelect={() => handleLocationSelect(result.lat, result.lon)}
-                          >
-                            <Search className="mr-2 h-4 w-4" />
-                            {result.display_name}
-                          </CommandItem>
-                        ))
-                      )}
-                    </CommandGroup>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+              <h1 className="bg-gradient-to-r from-blue to-purple-400 bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
+                SkateSpot
+              </h1>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative w-[250px]">
+                <Command className="rounded-lg border shadow-sm">
+                  <CommandInput
+                    placeholder="Search for skate spots..."
+                    value={searchQuery}
+                    onValueChange={setSearchQuery}
+                    className="h-10"
+                  />
+                  {searchQuery && (
+                    <div className="absolute left-0 right-0 top-full mt-1">
+                      <CommandList className="max-h-[200px] w-full overflow-auto rounded-md bg-white shadow-md">
+                        <CommandEmpty>No location found.</CommandEmpty>
+                        <CommandGroup>
+                          {isSearching ? (
+                            <div className="flex items-center justify-center py-4">
+                              <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-gray-900"></div>
+                            </div>
+                          ) : (
+                            searchResults.map((result) => (
+                              <CommandItem
+                                key={`${result.lat}-${result.lon}`}
+                                value={result.display_name}
+                                onSelect={() => handleSearchResultSelect(result.lat, result.lon)}
+                              >
+                                <Search className="mr-2 h-4 w-4" />
+                                {result.display_name}
+                              </CommandItem>
+                            ))
+                          )}
+                        </CommandGroup>
+                      </CommandList>
+                    </div>
+                  )}
+                </Command>
+              </div>
               {isAdmin && (
-                <>
+                <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
                     size="sm"
+                    className="bg-white/50 hover:bg-white"
                     onClick={() => {
                       setIsReportsDialogOpen(true)
                       fetchAdminReports()
@@ -1060,6 +1206,7 @@ export default function Map() {
                   <Button
                     variant="outline"
                     size="sm"
+                    className="bg-white/50 hover:bg-white"
                     onClick={() => {
                       setIsAdminProposalsDialogOpen(true)
                       fetchAdminProposals()
@@ -1067,21 +1214,32 @@ export default function Map() {
                   >
                     Review Proposals
                   </Button>
-                </>
+                </div>
               )}
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 text-xs text-gray-500">
-            <span>• Click map to add spot</span>
-            <span>• Delete your own spots</span>
-            <span>• Categorized by type (Street/Park/DIY)</span>
-            <span>• Toggle between satellite/street view</span>
-          </div>
+          {showWelcomeMessage && (
+            <div className="bg-blue-50 text-blue-700 mt-4 rounded-lg p-3 text-sm">
+              <div className="flex items-start justify-between">
+                <p>
+                  Welcome to SkateSpot! Find, add, and share your favorite skate spots. Click
+                  anywhere on the map to add a new spot, or use the search to find existing
+                  locations.
+                </p>
+                <button
+                  onClick={handleDismissWelcome}
+                  className="text-blue-400 hover:text-blue-600 ml-2"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Map container */}
-      <div className="w-full flex-1">
+      <div className="relative w-full flex-1">
         <MapContainer
           key={`map-${mapKey}`}
           center={userLocation || [0, 0]}
@@ -1106,44 +1264,104 @@ export default function Map() {
           <LocationMarker onLocationSelect={handleLocationSelect} />
 
           {/* Map Controls */}
-          <div className="leaflet-top leaflet-right">
-            <div className="leaflet-control leaflet-bar flex gap-1 rounded-lg bg-white p-1 shadow-md">
-              <Select
-                value={mapType}
-                onValueChange={(value: 'satellite' | 'street') => setMapType(value)}
+          <div className="absolute right-4 top-4 z-[1000] flex flex-col gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              className={`h-8 w-8 border-0 bg-white text-black hover:bg-gray-100 ${
+                showNearbySessions ? 'bg-blue-100' : ''
+              }`}
+              onClick={() => {
+                setShowNearbySessions(!showNearbySessions)
+                if (!showNearbySessions) {
+                  fetchNearbySessions()
+                  setIsNearbySessionsDialogOpen(true)
+                }
+              }}
+            >
+              <Users className="h-4 w-4" />
+            </Button>
+            <Select
+              value={mapType}
+              onValueChange={(value: 'satellite' | 'street') => setMapType(value)}
+            >
+              <SelectTrigger className="w-[140px] bg-white/90 backdrop-blur-sm">
+                <SelectValue placeholder="Map Type" />
+              </SelectTrigger>
+              <SelectContent
+                position="popper"
+                sideOffset={5}
+                align="end"
+                className="z-[1000]"
+                style={{ zIndex: 1000 }}
               >
-                <SelectTrigger className="h-8 w-[100px] border-0 bg-white text-black">
-                  <SelectValue placeholder="Map Type" />
-                </SelectTrigger>
-                <SelectContent className="bg-white text-black">
-                  <SelectItem
-                    className="!focus:bg-zinc-300 focus:text-black dark:focus:text-white"
-                    value="satellite"
-                  >
-                    Satellite
-                  </SelectItem>
-                  <SelectItem
-                    className="!focus:bg-zinc-300 focus:text-black dark:focus:text-white"
-                    value="street"
-                  >
-                    Street
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8 border-0 bg-white text-black hover:bg-gray-100"
-                onClick={toggleFullscreen}
-              >
-                {isFullscreen ? (
-                  <Minimize2 className="h-4 w-4" />
-                ) : (
-                  <Maximize2 className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
+                <SelectItem value="street">Street View</SelectItem>
+                <SelectItem value="satellite">Satellite</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8 border-0 bg-white text-black hover:bg-gray-100"
+              onClick={toggleFullscreen}
+            >
+              {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </Button>
           </div>
+
+          {/* Nearby Sessions Markers */}
+          {showNearbySessions && (
+            <>
+              {isLoadingNearbySessions ? (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/50">
+                  <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900"></div>
+                </div>
+              ) : (
+                nearbySessions.map((session) => (
+                  <Marker
+                    key={session.id}
+                    position={session.coordinates}
+                    icon={L.divIcon({
+                      className: 'nearby-session-marker',
+                      html: `<div class="relative">
+                        <div class="absolute -bottom-5 left-1/2 -translate-x-1/2 bg-green-500 w-3 h-3 rounded-full"></div>
+                      </div>`,
+                      iconSize: [16, 16],
+                      iconAnchor: [6, 6],
+                    })}
+                  >
+                    <Popup>
+                      <div className="p-2">
+                        <h3 className="font-semibold">{session.title}</h3>
+                        <p className="text-sm text-gray-600">{session.description}</p>
+                        <p className="mt-2 text-sm text-gray-500">
+                          {formatDistanceToNow(session.date, { addSuffix: true })}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {(session.distance * 0.621371).toFixed(1)} miles away
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-2 w-full"
+                          onClick={() => {
+                            setSelectedSpotForMeetup({
+                              id: session.spotId,
+                              name: session.spotName,
+                            })
+                            setIsMeetupsListDialogOpen(true)
+                            getMeetups(session.spotId).then(setMeetups)
+                          }}
+                        >
+                          View Details
+                        </Button>
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))
+              )}
+            </>
+          )}
 
           {isLoadingPoints ? (
             <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/50">
@@ -1185,7 +1403,7 @@ export default function Map() {
 
                     {/* Pending Proposals */}
                     {proposals[point.id]?.filter((p) => p.status === 'pending').length > 0 && (
-                      <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-2">
+                      <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
                         <p className="text-sm text-yellow-800">
                           ⚠️ This spot has pending edit proposals
                         </p>
@@ -1201,9 +1419,9 @@ export default function Map() {
 
                     {/* Report Status */}
                     {reports[point.id]?.length > 0 && (
-                      <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-2">
+                      <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
                         <p className="text-sm text-yellow-800">
-                          ⚠️ This spot has been reported as potentially unavailable
+                          ⚠️ This spot has been reported for removal
                         </p>
                         <p className="mt-1 text-xs text-yellow-600">
                           {reports[point.id].length} report
@@ -1514,7 +1732,7 @@ export default function Map() {
 
       {/* Report Dialog */}
       <Dialog open={isReportDialogOpen} onOpenChange={setIsReportDialogOpen}>
-        <DialogContent className="w-[90vw] sm:max-w-[425px]">
+        <DialogContent className="z-[9999] w-[90vw] sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Report Spot</DialogTitle>
           </DialogHeader>
@@ -1543,7 +1761,7 @@ export default function Map() {
 
       {/* Reports Dialog */}
       <Dialog open={isReportsDialogOpen} onOpenChange={setIsReportsDialogOpen}>
-        <DialogContent className="max-h-[80vh] w-[90vw] sm:max-w-[800px]">
+        <DialogContent className="z-[9999] max-h-[52vh] w-[90vw] md:max-h-[80vh] md:max-w-[800px]">
           <DialogHeader>
             <DialogTitle>Manage Reports</DialogTitle>
           </DialogHeader>
@@ -1556,6 +1774,29 @@ export default function Map() {
               <p className="text-center text-gray-500">No reports to manage</p>
             ) : (
               <ScrollArea className="h-[60vh] pr-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    {adminReports.length} reports pending review
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleDenyAllReports}
+                    disabled={isDenyingAll || adminReports.length === 0}
+                  >
+                    {isDenyingAll ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Denying All...
+                      </>
+                    ) : (
+                      <>
+                        <X className="mr-2 h-4 w-4" />
+                        Deny All Reports
+                      </>
+                    )}
+                  </Button>
+                </div>
                 {adminReports.map((report) => (
                   <Card key={report.id} className="mb-4">
                     <CardHeader>
@@ -1566,25 +1807,38 @@ export default function Map() {
                             Reported {formatDistanceToNow(report.createdAt, { addSuffix: true })}
                           </p>
                         </div>
-                        <Select
-                          value={report.status}
-                          onValueChange={(value: 'pending' | 'reviewed' | 'resolved') =>
-                            handleUpdateReportStatus(report.id, value)
-                          }
-                          disabled={isUpdatingReport[report.id]}
-                        >
-                          <SelectTrigger className="w-[120px]">
-                            <SelectValue />
-                            {isUpdatingReport[report.id] && (
-                              <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                        <div className="flex gap-2">
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => handleUpdateReportStatus(report.id, 'accept')}
+                            disabled={isUpdatingReport[report.id]}
+                          >
+                            {isUpdatingReport[report.id] && 'accept' ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Removing...
+                              </>
+                            ) : (
+                              'Remove Spot'
                             )}
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="pending">Pending</SelectItem>
-                            <SelectItem value="reviewed">Reviewed</SelectItem>
-                            <SelectItem value="resolved">Resolved</SelectItem>
-                          </SelectContent>
-                        </Select>
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleUpdateReportStatus(report.id, 'deny')}
+                            disabled={isUpdatingReport[report.id]}
+                          >
+                            {isUpdatingReport[report.id] && 'deny' ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Denying...
+                              </>
+                            ) : (
+                              'Deny Report'
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -1797,6 +2051,67 @@ export default function Map() {
             >
               Create New Session
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Nearby Sessions Dialog */}
+      <Dialog open={isNearbySessionsDialogOpen} onOpenChange={setIsNearbySessionsDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Nearby Skate Sessions
+            </DialogTitle>
+            <DialogDescription>Find and join skate sessions near you</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              {nearbySessions.length} active sessions found
+            </div>
+            <ScrollArea className="h-[400px] rounded-md border p-4">
+              {nearbySessions.length === 0 ? (
+                <div className="text-center text-muted-foreground">
+                  No active sessions found nearby
+                </div>
+              ) : (
+                nearbySessions.map((session) => (
+                  <Card key={session.id} className="mb-4">
+                    <CardHeader>
+                      <CardTitle className="text-lg">{session.title}</CardTitle>
+                      <CardDescription>{session.spotName}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground">{session.description}</p>
+                      <div className="mt-2 flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">
+                          {formatDistanceToNow(session.date, { addSuffix: true })}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {(session.distance * 0.621371).toFixed(1)} miles away
+                        </span>
+                      </div>
+                    </CardContent>
+                    <CardFooter>
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => {
+                          setSelectedSpotForMeetup({
+                            id: session.spotId,
+                            name: session.spotName,
+                          })
+                          setIsMeetupsListDialogOpen(true)
+                          getMeetups(session.spotId).then(setMeetups)
+                        }}
+                      >
+                        View Details
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                ))
+              )}
+            </ScrollArea>
           </div>
         </DialogContent>
       </Dialog>

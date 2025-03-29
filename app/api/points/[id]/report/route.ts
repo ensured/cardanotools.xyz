@@ -57,6 +57,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     reports.push(newReport)
     await kv.set(`reports:${params.id}`, reports)
 
+    // Clear the admin reports cache to ensure new reports appear immediately
+    await kv.del('admin:reports')
+
     return NextResponse.json(newReport)
   } catch (error) {
     console.error('Error creating report:', error)

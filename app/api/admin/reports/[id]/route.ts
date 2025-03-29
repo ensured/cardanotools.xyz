@@ -21,31 +21,47 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     const body = await request.json()
     const { status } = body
 
-    // Get all points
-    const points = await kv.keys('point:*')
-    let reportFound = false
-
-    // Find and update the report
-    for (const pointKey of points) {
-      const pointId = pointKey.replace('point:', '')
-      const reports = (await kv.get<Report[]>(`reports:${pointId}`)) || []
-
-      const updatedReports = reports.map((report) => {
-        if (report.id === params.id) {
-          reportFound = true
-          return { ...report, status }
-        }
-        return report
-      })
-
-      if (reportFound) {
-        await kv.set(`reports:${pointId}`, updatedReports)
-        break
-      }
+    if (status !== 'accept' && status !== 'deny') {
+      return new NextResponse('Invalid status', { status: 400 })
     }
 
-    if (!reportFound) {
+    // Get all report keys
+    const reportKeys = await kv.keys('reports:*')
+
+    // Find the report and its associated spot
+    let reportFound = false
+    let spotId: string | null = null
+    let report: Report | null = null
+
+    // Use Promise.all to fetch all reports in parallel
+    const reportPromises = reportKeys.map(async (key) => {
+      const reports = await kv.get<Report[]>(key)
+      const foundReport = reports?.find((r) => r.id === params.id)
+      if (foundReport) {
+        spotId = key.replace('reports:', '')
+        report = foundReport
+        return true
+      }
+      return false
+    })
+
+    const results = await Promise.all(reportPromises)
+    reportFound = results.some((found) => found)
+
+    if (!reportFound || !spotId || !report) {
       return new NextResponse('Report not found', { status: 404 })
+    }
+
+    if (status === 'accept') {
+      // Remove the spot
+      await kv.del(`point:${spotId}`)
+      // Remove all reports for this spot
+      await kv.del(`reports:${spotId}`)
+    } else {
+      // Get current reports and remove the specific report
+      const currentReports = (await kv.get<Report[]>(`reports:${spotId}`)) || []
+      const updatedReports = currentReports.filter((r) => r.id !== params.id)
+      await kv.set(`reports:${spotId}`, updatedReports)
     }
 
     return new NextResponse(null, { status: 204 })

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { kv } from '@vercel/kv'
-import { isAdmin } from 'lib/admin' 
+import { isAdmin } from 'lib/admin'
 
 interface MapPoint {
   id: string
@@ -30,28 +30,35 @@ export async function GET() {
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    // Get all points
-    const points = await kv.keys('point:*')
-    const allReports: Report[] = []
+    // Get all points and report keys in parallel
+    const [points, reportKeys] = await Promise.all([
+      kv.mget<MapPoint[]>(await kv.keys('point:*')),
+      kv.keys('reports:*'),
+    ])
 
-    // Fetch reports for each point
-    for (const pointKey of points) {
-      const pointId = pointKey.replace('point:', '')
-      const point = await kv.get<MapPoint>(pointKey)
-      const reports = (await kv.get<Report[]>(`reports:${pointId}`)) || []
+    // Create a map of point IDs to point data for quick lookup
+    const pointsMap = new Map(points.map((point) => [point.id, point]))
 
-      // Skip if point doesn't exist
-      if (!point) continue
+    // Get all reports in parallel
+    const reports = await Promise.all(
+      reportKeys.map(async (key) => {
+        const pointId = key.replace('reports:', '')
+        const reports = (await kv.get<Report[]>(key)) || []
 
-      // Add spot information to each report
-      const reportsWithSpotInfo = reports.map((report: Report) => ({
-        ...report,
-        spotId: pointId,
-        spotName: point.name,
-      }))
+        // Get point data if it exists, otherwise use a default name
+        const point = pointsMap.get(pointId)
+        const spotName = point?.name || 'Unknown Spot'
 
-      allReports.push(...reportsWithSpotInfo)
-    }
+        return reports.map((report) => ({
+          ...report,
+          spotId: pointId,
+          spotName,
+        }))
+      }),
+    )
+
+    // Flatten and filter out null values
+    const allReports = reports.flat().filter((r): r is Report => r !== null)
 
     // Sort by creation date, newest first
     allReports.sort((a, b) => b.createdAt - a.createdAt)
