@@ -1267,9 +1267,9 @@ export default function Map() {
           <div className="absolute right-4 top-4 z-[1000] flex flex-col gap-2">
             <Button
               variant="outline"
-              size="icon"
-              className={`h-8 w-8 border-0 bg-white text-black hover:bg-gray-100 ${
-                showNearbySessions ? 'bg-blue-100' : ''
+              size="sm"
+              className={`h-8 border-0 bg-white hover:bg-gray-100 ${
+                showNearbySessions ? 'border border-blue' : 'border border-transparent'
               }`}
               onClick={() => {
                 setShowNearbySessions(!showNearbySessions)
@@ -1280,6 +1280,7 @@ export default function Map() {
               }}
             >
               <Users className="h-4 w-4" />
+              {showNearbySessions ? 'Hide Sessions' : 'Show Sessions'}
             </Button>
             <Select
               value={mapType}
@@ -2057,7 +2058,7 @@ export default function Map() {
 
       {/* Nearby Sessions Dialog */}
       <Dialog open={isNearbySessionsDialogOpen} onOpenChange={setIsNearbySessionsDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="mt-7 max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Calendar className="h-5 w-5" />
