@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 import { kv } from '@vercel/kv'
-import { isAdmin } from '@/lib/admin'
+import { isAdmin } from 'lib/admin' 
 
 interface MapPoint {
   id: string
@@ -44,7 +44,7 @@ export async function GET() {
       if (!point) continue
 
       // Add spot information to each report
-      const reportsWithSpotInfo = reports.map((report) => ({
+      const reportsWithSpotInfo = reports.map((report: Report) => ({
         ...report,
         spotId: pointId,
         spotName: point.name,

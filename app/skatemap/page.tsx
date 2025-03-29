@@ -1,11 +1,5 @@
-import MapWrapper from '@/components/MapWrapper';
+import MapWrapper from '@/components/MapWrapper'
 
-export default async function MapPage() {
-
-
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-between">
-        <MapWrapper />
-    </main>
-  );
-} 
+export default function MapPage() {
+  return <MapWrapper />
+}

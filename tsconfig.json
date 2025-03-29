@@ -9,7 +9,7 @@
     "incremental": true,
     "esModuleInterop": true,
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "baseUrl": ".",
@@ -23,7 +23,7 @@
     ],
     "strictNullChecks": true,
     "typeRoots": ["./types", "./node_modules/@types"],
-    "target": "ES2024",
+    "target": "es2022",
     "jsx": "preserve"
   },
   "include": [

@@ -233,6 +233,16 @@ export default function Map() {
   const [meetups, setMeetups] = useState<any[]>([])
   const [editingComment, setEditingComment] = useState<{ id: string; content: string } | null>(null)
   const [isEditingComment, setIsEditingComment] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
+
+  useEffect(() => {
+    setIsMounted(true)
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove()
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if ('geolocation' in navigator) {
@@ -949,8 +959,12 @@ export default function Map() {
     }
   }
 
-  if (!isLoaded) {
-    return <div>Loading...</div>
+  if (!isLoaded || !isMounted) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
   }
 
   if (!user) {
@@ -1044,6 +1058,7 @@ export default function Map() {
       {/* Map container */}
       <div className="w-full flex-1">
         <MapContainer
+          key={`map-${isMounted}`}
           center={userLocation || [0, 0]}
           zoom={zoom}
           className="h-full w-full"
