@@ -10,7 +10,7 @@ export async function SiteHeader() {
   const epochData = await getEpochData()
 
   return (
-    <header className="z-40 w-full overflow-x-auto border-b border-border bg-background">
+    <header className="sticky top-0 z-40 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="flex w-full items-center gap-1 px-2 pt-2 md:px-2">
         <MainNav HeaderNavSheet={<HeaderNavSheet />} />
 

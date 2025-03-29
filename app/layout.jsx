@@ -60,11 +60,9 @@ export default async function RootLayout({ children }) {
                 }}
               />
               <CommitProvider>
-                <div className="flex min-h-screen flex-col">
-                  <div className="relative">
-                    <SiteHeader />
-                  </div>
-                  <main className="grow">{children}</main>
+                <div className="relative flex min-h-screen flex-col">
+                  <SiteHeader />
+                  <main className="flex-1">{children}</main>
                   <Footer />
                 </div>
                 <SpeedInsights />

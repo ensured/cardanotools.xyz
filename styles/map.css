@@ -1,0 +1,109 @@
+/* Ensure the map container takes full height */
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  z-index: 0;
+}
+
+/* Style popups for better mobile display */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.leaflet-popup-content {
+  margin: 0;
+  padding: 0;
+}
+
+/* Ensure controls are accessible on mobile */
+.leaflet-control-container {
+  z-index: 1;
+}
+
+/* Style the attribution for better mobile display */
+.leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.8);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* Ensure the dialog appears above the map */
+[role="dialog"] {
+  z-index: 50;
+}
+
+/* Marker icon styling */
+.leaflet-marker-icon {
+  width: 25px !important;
+  height: 41px !important;
+  margin-left: -12px !important;
+  margin-top: -41px !important;
+  background-size: contain !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+}
+
+/* Mobile-specific adjustments */
+@media (max-width: 640px) {
+  .leaflet-popup {
+    max-width: 90vw;
+  }
+  
+  .leaflet-control-attribution {
+    font-size: 10px;
+    padding: 2px 4px;
+  }
+
+  .leaflet-marker-icon {
+    width: 20px !important;
+    height: 32px !important;
+    margin-left: -10px !important;
+    margin-top: -32px !important;
+  }
+}
+
+/* Layer control styling */
+.leaflet-control-layers {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.leaflet-control-layers-toggle {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='7' height='7'%3E%3C/rect%3E%3Crect x='14' y='3' width='7' height='7'%3E%3C/rect%3E%3Crect x='14' y='14' width='7' height='7'%3E%3C/rect%3E%3Crect x='3' y='14' width='7' height='7'%3E%3C/rect%3E%3C/svg%3E");
+}
+
+.leaflet-control-layers-expanded {
+  padding: 6px 10px;
+}
+
+.leaflet-control-layers-scrollbar {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.leaflet-control-layers-selector {
+  margin-right: 8px;
+}
+
+.leaflet-control-layers label {
+  margin-bottom: 4px;
+  display: block;
+  font-size: 14px;
+}
+
+/* Mobile adjustments for layer control */
+@media (max-width: 640px) {
+  .leaflet-control-layers {
+    font-size: 12px;
+  }
+  
+  .leaflet-control-layers-expanded {
+    padding: 4px 8px;
+  }
+  
+  .leaflet-control-layers-scrollbar {
+    max-height: 150px;
+  }
+} 
