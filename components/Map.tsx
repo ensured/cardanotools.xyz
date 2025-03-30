@@ -196,6 +196,102 @@ function LocationMarker({ onLocationSelect }: LocationMarkerProps) {
   return null
 }
 
+// Add this new component before the Map component
+function EditProposalDialog({
+  isOpen,
+  onOpenChange,
+  spotToEdit,
+  onSubmit,
+  isSubmitting,
+}: {
+  isOpen: boolean
+  onOpenChange: (open: boolean) => void
+  spotToEdit: MapPoint | null
+  onSubmit: (
+    proposedName: string,
+    proposedType: 'street' | 'park' | 'diy',
+    editReason: string,
+  ) => Promise<void>
+  isSubmitting: boolean
+}) {
+  const [proposedName, setProposedName] = useState(spotToEdit?.name || '')
+  const [proposedType, setProposedType] = useState<'street' | 'park' | 'diy'>(
+    spotToEdit?.type || 'street',
+  )
+  const [editReason, setEditReason] = useState('')
+
+  // Reset form when spotToEdit changes
+  useEffect(() => {
+    if (spotToEdit) {
+      setProposedName(spotToEdit.name)
+      setProposedType(spotToEdit.type)
+      setEditReason('')
+    }
+  }, [spotToEdit])
+
+  const handleSubmit = async () => {
+    if (!proposedName || !proposedType || !editReason) return
+    await onSubmit(proposedName, proposedType, editReason)
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[90vw] sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Propose Edit</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor="proposedName">Proposed Name</Label>
+            <Input
+              id="proposedName"
+              value={proposedName}
+              onChange={(e) => setProposedName(e.target.value)}
+              placeholder="Enter proposed name"
+              required
+              className="w-full"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="proposedType">Proposed Type</Label>
+            <Select
+              value={proposedType}
+              onValueChange={(value: 'street' | 'park' | 'diy') => setProposedType(value)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="street">Street</SelectItem>
+                <SelectItem value="park">Park</SelectItem>
+                <SelectItem value="diy">DIY</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="editReason">Reason for Edit</Label>
+            <Textarea
+              id="editReason"
+              value={editReason}
+              onChange={(e) => setEditReason(e.target.value)}
+              placeholder="Please explain why this spot needs to be edited..."
+              className="min-h-[100px]"
+              required
+            />
+          </div>
+          <Button
+            onClick={handleSubmit}
+            className="w-full"
+            disabled={!proposedName || !proposedType || !editReason || isSubmitting}
+          >
+            {isSubmitting ? 'Submitting...' : 'Submit Proposal'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export default function Map() {
   const { user, isLoaded } = useUser()
   const [points, setPoints] = useState<MapPoint[]>([])
@@ -244,9 +340,6 @@ export default function Map() {
   const [open, setOpen] = useState(false)
   const [isEditProposalDialogOpen, setIsEditProposalDialogOpen] = useState(false)
   const [spotToEdit, setSpotToEdit] = useState<MapPoint | null>(null)
-  const [proposedName, setProposedName] = useState('')
-  const [proposedType, setProposedType] = useState<'street' | 'park' | 'diy'>('street')
-  const [editReason, setEditReason] = useState('')
   const [isSubmittingProposal, setIsSubmittingProposal] = useState(false)
   const [proposals, setProposals] = useState<Record<string, EditProposal[]>>({})
   const [isLoadingProposals, setIsLoadingProposals] = useState<Record<string, boolean>>({})
@@ -831,42 +924,148 @@ export default function Map() {
       }
     }
 
+    // If user is admin, fetch admin data
+    const fetchAdminData = async () => {
+      if (isAdmin) {
+        try {
+          // Fetch admin reports
+          const reportsResponse = await fetch('/api/admin/reports')
+          if (reportsResponse.ok) {
+            const reportsData = await reportsResponse.json()
+            setAdminReports(reportsData)
+          }
+
+          // Fetch admin proposals
+          const proposalsResponse = await fetch('/api/admin/proposals')
+          if (proposalsResponse.ok) {
+            const proposalsData = await proposalsResponse.json()
+            setAdminProposals(proposalsData)
+          }
+        } catch (error) {
+          console.error('Error fetching admin data:', error)
+        }
+      }
+    }
+
     fetchPoints()
-  }, [])
+    fetchAdminData()
+  }, [isAdmin])
 
-  const handleProposeEdit = async () => {
-    if (!spotToEdit || !proposedName || !proposedType || !editReason) return
+  const handleEditComment = async (spotId: string, commentId: string) => {
+    if (!editingComment || !editingComment.content.trim()) return
 
-    setIsSubmittingProposal(true)
+    setIsEditingComment(true)
     try {
-      const response = await fetch(`/api/points/${spotToEdit.id}/proposals`, {
-        method: 'POST',
+      const response = await fetch(`/api/points/${spotId}/comments`, {
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          proposedName,
-          proposedType,
-          reason: editReason,
+          commentId,
+          content: editingComment.content,
         }),
       })
 
       if (response.ok) {
-        setIsEditProposalDialogOpen(false)
-        setSpotToEdit(null)
-        setProposedName('')
-        setProposedType('street')
-        setEditReason('')
-        toast.success('Edit proposal submitted successfully!')
+        const updatedComment = await response.json()
+        setComments((prev) => ({
+          ...prev,
+          [spotId]: prev[spotId].map((c) => (c.id === commentId ? updatedComment : c)),
+        }))
+        setEditingComment(null)
+        toast.success('Comment updated successfully')
       } else {
-        toast.error('Failed to submit edit proposal. Please try again.')
+        toast.error('Failed to update comment')
       }
     } catch (error) {
-      console.error('Error submitting proposal:', error)
-      toast.error('An error occurred. Please try again.')
+      console.error('Error updating comment:', error)
+      toast.error('An error occurred while updating the comment')
     } finally {
-      setIsSubmittingProposal(false)
+      setIsEditingComment(false)
     }
+  }
+
+  // Add effect to check localStorage for welcome message preference
+  useEffect(() => {
+    const hasSeenWelcome = localStorage.getItem('hasSeenWelcome')
+    if (hasSeenWelcome === 'true') {
+      setShowWelcomeMessage(false)
+    }
+  }, [])
+
+  // Add function to handle welcome message dismissal
+  const handleDismissWelcome = () => {
+    setShowWelcomeMessage(false)
+    localStorage.setItem('hasSeenWelcome', 'true')
+  }
+
+  const handleDenyAllReports = async () => {
+    try {
+      setIsDenyingAll(true)
+      const response = await fetch('/api/admin/reports/deny-all', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to deny all reports')
+      }
+
+      // Refresh the reports list
+      const updatedReports = await fetch('/api/admin/reports').then((res) => res.json())
+      setAdminReports(updatedReports)
+      toast.success('All reports have been denied')
+    } catch (error) {
+      console.error('Error denying all reports:', error)
+      toast.error('Failed to deny all reports')
+    } finally {
+      setIsDenyingAll(false)
+    }
+  }
+
+  // Add function to fetch nearby sessions
+  const fetchNearbySessions = async () => {
+    if (!mapRef.current) return
+
+    // Don't fetch if zoomed out too far (zoom level less than 8)
+    if (mapRef.current.getZoom() < 8) {
+      setNearbySessions([])
+      return
+    }
+
+    setIsLoadingNearbySessions(true)
+    try {
+      const center = mapRef.current.getCenter()
+      const response = await fetch(
+        `/api/meetups/nearby?lat=${center.lat}&lng=${center.lng}&radius=50`,
+      )
+      if (response.ok) {
+        const data = await response.json()
+        setNearbySessions(data)
+      }
+    } catch (error) {
+      console.error('Error fetching nearby sessions:', error)
+    } finally {
+      setIsLoadingNearbySessions(false)
+    }
+  }
+
+  // Add effect to fetch nearby sessions when toggle is changed
+  useEffect(() => {
+    if (showNearbySessions) {
+      fetchNearbySessions()
+    } else {
+      setNearbySessions([])
+    }
+  }, [showNearbySessions])
+
+  // Update the marker color based on active sessions
+  const getMarkerColor = (point: MapPoint) => {
+    const hasActiveSession = nearbySessions.some((session) => session.spotId === point.id)
+    return hasActiveSession ? '#9333ea' : '#ef4444' // Purple for active sessions, red for others
   }
 
   const handleUpdateProposal = async (
@@ -1032,9 +1231,6 @@ export default function Map() {
           onClick={(e) => {
             e.stopPropagation()
             setSpotToEdit(point)
-            setProposedName(point.name)
-            setProposedType(point.type)
-            setEditReason('')
             setIsEditProposalDialogOpen(true)
           }}
         >
@@ -1162,123 +1358,6 @@ export default function Map() {
     )
   }
 
-  const handleEditComment = async (spotId: string, commentId: string) => {
-    if (!editingComment || !editingComment.content.trim()) return
-
-    setIsEditingComment(true)
-    try {
-      const response = await fetch(`/api/points/${spotId}/comments`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          commentId,
-          content: editingComment.content,
-        }),
-      })
-
-      if (response.ok) {
-        const updatedComment = await response.json()
-        setComments((prev) => ({
-          ...prev,
-          [spotId]: prev[spotId].map((c) => (c.id === commentId ? updatedComment : c)),
-        }))
-        setEditingComment(null)
-        toast.success('Comment updated successfully')
-      } else {
-        toast.error('Failed to update comment')
-      }
-    } catch (error) {
-      console.error('Error updating comment:', error)
-      toast.error('An error occurred while updating the comment')
-    } finally {
-      setIsEditingComment(false)
-    }
-  }
-
-  // Add effect to check localStorage for welcome message preference
-  useEffect(() => {
-    const hasSeenWelcome = localStorage.getItem('hasSeenWelcome')
-    if (hasSeenWelcome === 'true') {
-      setShowWelcomeMessage(false)
-    }
-  }, [])
-
-  // Add function to handle welcome message dismissal
-  const handleDismissWelcome = () => {
-    setShowWelcomeMessage(false)
-    localStorage.setItem('hasSeenWelcome', 'true')
-  }
-
-  const handleDenyAllReports = async () => {
-    try {
-      setIsDenyingAll(true)
-      const response = await fetch('/api/admin/reports/deny-all', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to deny all reports')
-      }
-
-      // Refresh the reports list
-      const updatedReports = await fetch('/api/admin/reports').then((res) => res.json())
-      setAdminReports(updatedReports)
-      toast.success('All reports have been denied')
-    } catch (error) {
-      console.error('Error denying all reports:', error)
-      toast.error('Failed to deny all reports')
-    } finally {
-      setIsDenyingAll(false)
-    }
-  }
-
-  // Add function to fetch nearby sessions
-  const fetchNearbySessions = async () => {
-    if (!mapRef.current) return
-
-    // Don't fetch if zoomed out too far (zoom level less than 8)
-    if (mapRef.current.getZoom() < 8) {
-      setNearbySessions([])
-      return
-    }
-
-    setIsLoadingNearbySessions(true)
-    try {
-      const center = mapRef.current.getCenter()
-      const response = await fetch(
-        `/api/meetups/nearby?lat=${center.lat}&lng=${center.lng}&radius=50`,
-      )
-      if (response.ok) {
-        const data = await response.json()
-        setNearbySessions(data)
-      }
-    } catch (error) {
-      console.error('Error fetching nearby sessions:', error)
-    } finally {
-      setIsLoadingNearbySessions(false)
-    }
-  }
-
-  // Add effect to fetch nearby sessions when toggle is changed
-  useEffect(() => {
-    if (showNearbySessions) {
-      fetchNearbySessions()
-    } else {
-      setNearbySessions([])
-    }
-  }, [showNearbySessions])
-
-  // Update the marker color based on active sessions
-  const getMarkerColor = (point: MapPoint) => {
-    const hasActiveSession = nearbySessions.some((session) => session.spotId === point.id)
-    return hasActiveSession ? '#9333ea' : '#ef4444' // Purple for active sessions, red for others
-  }
-
   if (!isLoaded || !isMounted) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -1349,7 +1428,7 @@ export default function Map() {
                       fetchAdminReports()
                     }}
                   >
-                    Manage Reports
+                    Manage Reports ({adminReports.length})
                   </Button>
                   <Button
                     variant="outline"
@@ -1360,7 +1439,7 @@ export default function Map() {
                       fetchAdminProposals()
                     }}
                   >
-                    Review Proposals
+                    Review Proposals ({adminProposals.length})
                   </Button>
                 </div>
               )}
@@ -1639,21 +1718,19 @@ export default function Map() {
                               {(comment.createdBy === user.primaryEmailAddress?.emailAddress ||
                                 isAdmin) && (
                                 <div className="flex gap-2">
-                                  {editingComment?.id !== comment.id && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="text-blue-500 hover:text-blue-700"
-                                      onClick={() =>
-                                        setEditingComment({
-                                          id: comment.id,
-                                          content: comment.content,
-                                        })
-                                      }
-                                    >
-                                      Edit
-                                    </Button>
-                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-blue-500 hover:text-blue-700"
+                                    onClick={() =>
+                                      setEditingComment({
+                                        id: comment.id,
+                                        content: comment.content,
+                                      })
+                                    }
+                                  >
+                                    Edit
+                                  </Button>
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -1853,60 +1930,41 @@ export default function Map() {
       </Dialog>
 
       {/* Edit Proposal Dialog */}
-      <Dialog open={isEditProposalDialogOpen} onOpenChange={setIsEditProposalDialogOpen}>
-        <DialogContent className="w-[90vw] sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Propose Edit</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="proposedName">Proposed Name</Label>
-              <Input
-                id="proposedName"
-                value={proposedName}
-                onChange={(e) => setProposedName(e.target.value)}
-                placeholder="Enter proposed name"
-                required
-                className="w-full"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="proposedType">Proposed Type</Label>
-              <Select
-                value={proposedType}
-                onValueChange={(value: 'street' | 'park' | 'diy') => setProposedType(value)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="street">Street</SelectItem>
-                  <SelectItem value="park">Park</SelectItem>
-                  <SelectItem value="diy">DIY</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="editReason">Reason for Edit</Label>
-              <Textarea
-                id="editReason"
-                value={editReason}
-                onChange={(e) => setEditReason(e.target.value)}
-                placeholder="Please explain why this spot needs to be edited..."
-                className="min-h-[100px]"
-                required
-              />
-            </div>
-            <Button
-              onClick={handleProposeEdit}
-              className="w-full"
-              disabled={!proposedName || !proposedType || !editReason || isSubmittingProposal}
-            >
-              {isSubmittingProposal ? 'Submitting...' : 'Submit Proposal'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <EditProposalDialog
+        isOpen={isEditProposalDialogOpen}
+        onOpenChange={setIsEditProposalDialogOpen}
+        spotToEdit={spotToEdit}
+        onSubmit={async (proposedName, proposedType, editReason) => {
+          if (!spotToEdit) return
+          setIsSubmittingProposal(true)
+          try {
+            const response = await fetch(`/api/points/${spotToEdit.id}/proposals`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                proposedName,
+                proposedType,
+                reason: editReason,
+              }),
+            })
+
+            if (response.ok) {
+              setIsEditProposalDialogOpen(false)
+              toast.success('Edit proposal submitted successfully!')
+            } else {
+              toast.error('Failed to submit edit proposal. Please try again.')
+            }
+          } catch (error) {
+            console.error('Error submitting proposal:', error)
+            toast.error('An error occurred. Please try again.')
+          } finally {
+            setIsSubmittingProposal(false)
+          }
+        }}
+        isSubmitting={isSubmittingProposal}
+      />
 
       {importResult && (
         <div
