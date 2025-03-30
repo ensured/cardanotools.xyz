@@ -990,10 +990,23 @@ export default function Map() {
 
   // Update popup content to include meetup button
   const renderPopupContent = (point: MapPoint) => {
+    const activeSession = nearbySessions.find((session) => session.spotId === point.id)
+
     return (
       <div className="space-y-2">
         <h3 className="font-semibold">{point.name}</h3>
         <p className="text-sm text-gray-600">{point.type}</p>
+
+        {activeSession && (
+          <div className="mt-2 rounded-md bg-purple-50 p-2">
+            <h4 className="font-medium text-purple-900">Active Session</h4>
+            <p className="text-sm text-purple-700">{activeSession.title}</p>
+            <p className="text-xs text-purple-600">
+              {formatDistanceToNow(activeSession.date, { addSuffix: true })}
+            </p>
+          </div>
+        )}
+
         <div className="flex gap-2">
           <Button
             variant="outline"
@@ -1010,6 +1023,141 @@ export default function Map() {
             Skate Sessions
           </Button>
         </div>
+
+        {/* Edit Proposal Button */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-2 w-full"
+          onClick={(e) => {
+            e.stopPropagation()
+            setSpotToEdit(point)
+            setProposedName(point.name)
+            setProposedType(point.type)
+            setEditReason('')
+            setIsEditProposalDialogOpen(true)
+          }}
+        >
+          <Edit className="mr-1 h-4 w-4" />
+          Propose Edit
+        </Button>
+
+        {/* Pending Proposals */}
+        {proposals[point.id]?.filter((p) => p.status === 'pending').length > 0 && (
+          <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
+            <p className="text-sm text-yellow-800">⚠️ This spot has pending edit proposals</p>
+            <p className="mt-1 text-xs text-yellow-600">
+              {proposals[point.id].filter((p) => p.status === 'pending').length} proposal
+              {proposals[point.id].filter((p) => p.status === 'pending').length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        )}
+
+        {/* Report Status */}
+        {reports[point.id]?.length > 0 && (
+          <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
+            <p className="text-sm text-yellow-800">⚠️ This spot has been reported for removal</p>
+            <p className="mt-1 text-xs text-yellow-600">
+              {reports[point.id].length} report
+              {reports[point.id].length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        )}
+
+        {/* Likes Section */}
+        <div className="mt-2 flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`flex items-center gap-1 ${likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'like' ? 'text-green-500' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              handleLike(
+                point.id,
+                likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'like'
+                  ? null
+                  : 'like',
+              )
+            }}
+            disabled={isLoadingLikes[point.id]}
+          >
+            <ThumbsUp className="h-4 w-4" />
+            <span>{likes[point.id]?.filter((l) => l.status === 'like').length || 0}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`flex items-center gap-1 ${likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'dislike' ? 'text-red-500' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              handleLike(
+                point.id,
+                likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'dislike'
+                  ? null
+                  : 'dislike',
+              )
+            }}
+            disabled={isLoadingLikes[point.id]}
+          >
+            <ThumbsDown className="h-4 w-4" />
+            <span>{likes[point.id]?.filter((l) => l.status === 'dislike').length || 0}</span>
+          </Button>
+        </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-2 w-full"
+          onClick={(e) => {
+            e.stopPropagation()
+            setIsCommentsDialogOpen(true)
+          }}
+        >
+          Show Comments (
+          {isLoadingComments[point.id] ? (
+            <Loader2 className="inline-block h-4 w-4 animate-spin" />
+          ) : (
+            comments[point.id]?.length || 0
+          )}
+          )
+        </Button>
+
+        {/* Report Button */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-2 w-full text-gray-500 hover:text-red-500"
+          onClick={(e) => {
+            e.stopPropagation()
+            setSpotToReport(point.id)
+            setIsReportDialogOpen(true)
+          }}
+        >
+          <Flag className="mr-1 h-4 w-4" />
+          Report Spot
+        </Button>
+
+        {(point.createdBy === user!.primaryEmailAddress?.emailAddress || isAdmin) && (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="mt-2 w-full"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleDeletePoint(point.id)
+            }}
+            disabled={isDeletingPoint[point.id]}
+          >
+            {isDeletingPoint[point.id] ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              'Delete Spot'
+            )}
+          </Button>
+        )}
       </div>
     )
   }
@@ -1381,156 +1529,7 @@ export default function Map() {
                 }}
               >
                 <Popup className="max-w-[90vw] md:max-w-[300px]">
-                  <div className="p-2">
-                    {renderPopupContent(point)}
-
-                    {/* Edit Proposal Button */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-2 w-full"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setSpotToEdit(point)
-                        setProposedName(point.name)
-                        setProposedType(point.type)
-                        setEditReason('')
-                        setIsEditProposalDialogOpen(true)
-                      }}
-                    >
-                      <Edit className="mr-1 h-4 w-4" />
-                      Propose Edit
-                    </Button>
-
-                    {/* Pending Proposals */}
-                    {proposals[point.id]?.filter((p) => p.status === 'pending').length > 0 && (
-                      <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
-                        <p className="text-sm text-yellow-800">
-                          ⚠️ This spot has pending edit proposals
-                        </p>
-                        <p className="mt-1 text-xs text-yellow-600">
-                          {proposals[point.id].filter((p) => p.status === 'pending').length}{' '}
-                          proposal
-                          {proposals[point.id].filter((p) => p.status === 'pending').length !== 1
-                            ? 's'
-                            : ''}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Report Status */}
-                    {reports[point.id]?.length > 0 && (
-                      <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
-                        <p className="text-sm text-yellow-800">
-                          ⚠️ This spot has been reported for removal
-                        </p>
-                        <p className="mt-1 text-xs text-yellow-600">
-                          {reports[point.id].length} report
-                          {reports[point.id].length !== 1 ? 's' : ''}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Likes Section */}
-                    <div className="mt-2 flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={`flex items-center gap-1 ${likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'like' ? 'text-green-500' : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleLike(
-                            point.id,
-                            likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'like'
-                              ? null
-                              : 'like',
-                          )
-                        }}
-                        disabled={isLoadingLikes[point.id]}
-                      >
-                        <ThumbsUp className="h-4 w-4" />
-                        <span>
-                          {likes[point.id]?.filter((l) => l.status === 'like').length || 0}
-                        </span>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={`flex items-center gap-1 ${likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'dislike' ? 'text-red-500' : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleLike(
-                            point.id,
-                            likes[point.id]?.find((l) => l.userId === user?.id)?.status ===
-                              'dislike'
-                              ? null
-                              : 'dislike',
-                          )
-                        }}
-                        disabled={isLoadingLikes[point.id]}
-                      >
-                        <ThumbsDown className="h-4 w-4" />
-                        <span>
-                          {likes[point.id]?.filter((l) => l.status === 'dislike').length || 0}
-                        </span>
-                      </Button>
-                    </div>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-2 w-full"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setIsCommentsDialogOpen(true)
-                      }}
-                    >
-                      Show Comments (
-                      {isLoadingComments[point.id] ? (
-                        <Loader2 className="inline-block h-4 w-4 animate-spin" />
-                      ) : (
-                        comments[point.id]?.length || 0
-                      )}
-                      )
-                    </Button>
-
-                    {/* Report Button */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="mt-2 w-full text-gray-500 hover:text-red-500"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setSpotToReport(point.id)
-                        setIsReportDialogOpen(true)
-                      }}
-                    >
-                      <Flag className="mr-1 h-4 w-4" />
-                      Report Spot
-                    </Button>
-
-                    {(point.createdBy === user.primaryEmailAddress?.emailAddress || isAdmin) && (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="mt-2 w-full"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDeletePoint(point.id)
-                        }}
-                        disabled={isDeletingPoint[point.id]}
-                      >
-                        {isDeletingPoint[point.id] ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Deleting...
-                          </>
-                        ) : (
-                          'Delete Spot'
-                        )}
-                      </Button>
-                    )}
-                  </div>
+                  <div className="p-2">{renderPopupContent(point)}</div>
                 </Popup>
               </Marker>
             ))

@@ -10,6 +10,8 @@ interface Meetup {
   spotName: string
   createdBy: string
   coordinates?: [number, number]
+  participants: string[]
+  createdAt: number
 }
 
 interface MapPoint {
@@ -40,6 +42,36 @@ export async function GET(request: NextRequest) {
     )
     console.log('Raw meetups:', meetups)
 
+    // Clean up expired meetups
+    const now = Date.now()
+    const oneDayInMs = 12 * 60 * 60 * 1000 // 12 hours in milliseconds
+
+    for (const meetup of meetups) {
+      if (!meetup) continue
+      const isExpired = meetup.date + oneDayInMs < now
+      const timeUntilDeletion = meetup.date + oneDayInMs - now
+      console.log('Meetup cleanup check:', {
+        meetupId: meetup.id,
+        meetupDate: meetup.date,
+        isExpired,
+        timeUntilDeletion:
+          timeUntilDeletion > 0
+            ? `${Math.round(timeUntilDeletion / (1000 * 60 * 60))} hours`
+            : 'past deletion time',
+      })
+      if (isExpired) {
+        // Delete the expired meetup and its references
+        await kv.del(`meetup:${meetup.id}`)
+        await kv.lrem(`spot:${meetup.spotId}:meetups`, 0, meetup.id)
+        await kv.lrem(`user:${meetup.createdBy}:meetups`, 0, meetup.id)
+        // Remove meetup from all participants' lists
+        for (const participantId of meetup.participants) {
+          await kv.lrem(`user:${participantId}:meetups`, 0, meetup.id)
+        }
+        console.log('Deleted expired meetup:', meetup.id)
+      }
+    }
+
     // Get all spots for coordinates
     const spotKeys = await kv.keys('point:*')
     const spots = await Promise.all(
@@ -59,6 +91,10 @@ export async function GET(request: NextRequest) {
     // Filter out invalid meetups and get current time
     const validMeetups = meetups
       .filter((m): m is Meetup => m !== null)
+      .filter((m) => {
+        const isExpired = m.date + oneDayInMs < now
+        return !isExpired
+      })
       .map((meetup) => ({
         ...meetup,
         coordinates: spotCoordinates.get(meetup.spotId),
@@ -74,7 +110,6 @@ export async function GET(request: NextRequest) {
 
     console.log('Valid meetups with coordinates:', validMeetups)
 
-    const now = Date.now()
     const threeHoursAgo = now - 3 * 60 * 60 * 1000
     console.log('Time filter:', { now, threeHoursAgo })
 

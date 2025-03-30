@@ -70,6 +70,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     // Store proposal
     await kv.lpush(`proposals:${params.id}`, proposal)
 
+    // Clear the admin proposals cache since we added a new proposal
+    await kv.del('admin:proposals')
+
     return NextResponse.json(proposal)
   } catch (error) {
     console.error('Error creating proposal:', error)

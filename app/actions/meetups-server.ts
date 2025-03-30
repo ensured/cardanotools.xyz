@@ -47,7 +47,28 @@ export async function getMeetupsServer(spotId: string) {
       return meetup
     }),
   )
-  return meetups.filter((m): m is Meetup => m !== null)
+
+  const now = Date.now()
+  const oneDayInMs = 12 * 60 * 60 * 1000 // 12 hours in milliseconds
+
+  // Filter out expired meetups and delete them
+  const validMeetups = meetups.filter((m): m is Meetup => {
+    if (!m) return false
+    const isExpired = m.date + oneDayInMs < now
+    if (isExpired) {
+      // Delete the expired meetup and its references
+      kv.del(`meetup:${m.id}`)
+      kv.lrem(`spot:${m.spotId}:meetups`, 0, m.id)
+      kv.lrem(`user:${m.createdBy}:meetups`, 0, m.id)
+      // Remove meetup from all participants' lists
+      m.participants.forEach((participantId) => {
+        kv.lrem(`user:${participantId}:meetups`, 0, m.id)
+      })
+    }
+    return !isExpired
+  })
+
+  return validMeetups
 }
 
 export async function joinMeetupServer(meetupId: string) {
