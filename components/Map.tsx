@@ -1,7 +1,8 @@
 'use client'
 
 import { toast } from 'sonner'
-import { useEffect, useState, useRef } from 'react'
+import React from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import {
   MapContainer,
   TileLayer,
@@ -96,6 +97,7 @@ interface MapPoint {
   type: 'street' | 'park' | 'diy'
   coordinates: [number, number]
   createdBy: string
+  address?: string
 }
 
 interface LocationMarkerProps {
@@ -292,6 +294,53 @@ function EditProposalDialog({
   )
 }
 
+// Add this new component before the Map component
+const LocationNameInput = React.memo(
+  ({
+    value,
+    onChange,
+    disabled,
+  }: {
+    value: string
+    onChange: (value: string) => void
+    disabled?: boolean
+  }) => {
+    const inputRef = useRef<HTMLInputElement>(null)
+    const lastValueRef = useRef(value)
+
+    // Update the input value when the prop changes
+    useEffect(() => {
+      if (inputRef.current && value !== lastValueRef.current) {
+        inputRef.current.value = value
+        lastValueRef.current = value
+      }
+    }, [value])
+
+    return (
+      <Input
+        ref={inputRef}
+        id="name"
+        defaultValue={value}
+        onChange={(e) => {
+          const newValue = e.target.value
+          lastValueRef.current = newValue
+          onChange(newValue)
+        }}
+        placeholder="Enter location name"
+        required
+        className="w-full"
+        disabled={disabled}
+      />
+    )
+  },
+  (prevProps, nextProps) => {
+    // Only re-render if disabled state or value changes
+    return prevProps.disabled === nextProps.disabled && prevProps.value === nextProps.value
+  },
+)
+
+LocationNameInput.displayName = 'LocationNameInput'
+
 export default function Map() {
   const { user, isLoaded } = useUser()
   const [points, setPoints] = useState<MapPoint[]>([])
@@ -365,6 +414,13 @@ export default function Map() {
   const [nearbySessions, setNearbySessions] = useState<NearbyMeetup[]>([])
   const [isLoadingNearbySessions, setIsLoadingNearbySessions] = useState(false)
   const [isNearbySessionsDialogOpen, setIsNearbySessionsDialogOpen] = useState(false)
+  const [isAddingPoint, setIsAddingPoint] = useState(false)
+  const [isLoadingAddress, setIsLoadingAddress] = useState<Record<string, boolean>>({})
+
+  // Remove debounced handler and use direct state update
+  const handleNameChange = (value: string) => {
+    setNewPointName(value)
+  }
 
   useEffect(() => {
     // Only set mounted state if we're in the browser
@@ -473,8 +529,31 @@ export default function Map() {
     setSearchQuery('') // Clear the search query
   }
 
+  // Add this new function for address lookup
+  const lookupAddress = async (lat: number, lng: number): Promise<string> => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
+        {
+          headers: {
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+        },
+      )
+
+      if (response.ok) {
+        const data = await response.json()
+        return data.display_name || ''
+      }
+      return ''
+    } catch (error) {
+      console.error('Error fetching address:', error)
+      return ''
+    }
+  }
+
   const handleAddPoint = async () => {
-    if (!selectedLocation || !newPointName || !user) return
+    if (!selectedLocation || !newPointName || !user || isAddingPoint) return
 
     const userEmail = user.primaryEmailAddress?.emailAddress
     if (!userEmail) {
@@ -482,6 +561,9 @@ export default function Map() {
       return
     }
 
+    setIsAddingPoint(true)
+
+    // Create the new point without address initially
     const newPoint: MapPoint = {
       id: Date.now().toString(),
       name: newPointName,
@@ -497,7 +579,11 @@ export default function Map() {
     setIsDialogOpen(false)
 
     try {
-      const response = await fetch('/api/points', {
+      // Start address lookup in the background
+      const addressPromise = lookupAddress(selectedLocation.lat, selectedLocation.lng)
+
+      // Save the point to the database
+      const saveResponse = await fetch('/api/points', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -505,19 +591,27 @@ export default function Map() {
         body: JSON.stringify(newPoint),
       })
 
-      if (!response.ok) {
+      if (!saveResponse.ok) {
         // Revert optimistic update on error
         setPoints((prevPoints) => prevPoints.filter((p) => p.id !== newPoint.id))
-        if (response.status === 429) {
-          const errorData = await response.json()
+        if (saveResponse.status === 429) {
+          const errorData = await saveResponse.json()
           const remainingMinutes = Math.ceil(errorData.remainingTime / (60 * 1000))
           toast.error(
             `You have reached the maximum number of points (5) you can add in 45 minutes. Please wait ${remainingMinutes} minutes before adding more.`,
           )
         } else {
-          const errorText = await response.text()
+          const errorText = await saveResponse.text()
           console.error('Failed to add point:', errorText)
           toast.error('Failed to add point. Please try again.')
+        }
+      } else {
+        // Update the point with the address once we have it
+        const address = await addressPromise
+        if (address) {
+          setPoints((prevPoints) =>
+            prevPoints.map((p) => (p.id === newPoint.id ? { ...p, address } : p)),
+          )
         }
       }
     } catch (error) {
@@ -525,6 +619,8 @@ export default function Map() {
       setPoints((prevPoints) => prevPoints.filter((p) => p.id !== newPoint.id))
       console.error('Error adding point:', error)
       toast.error('An error occurred. Please try again.')
+    } finally {
+      setIsAddingPoint(false)
     }
   }
 
@@ -638,6 +734,11 @@ export default function Map() {
   }
 
   const handleDeleteComment = async (spotId: string, commentId: string) => {
+    if (!user?.primaryEmailAddress?.emailAddress) {
+      toast.error('Please wait while we verify your account...')
+      return
+    }
+
     // Optimistic update
     setComments((prev) => ({
       ...prev,
@@ -670,7 +771,8 @@ export default function Map() {
             [spotId]: (prev[spotId] || 0) + 1,
           }))
         }
-        toast.error('Failed to delete comment. Please try again.')
+        const errorText = await response.text()
+        toast.error(errorText || 'Failed to delete comment. Please try again.')
       }
     } catch (error) {
       // Revert optimistic update on error
@@ -817,13 +919,44 @@ export default function Map() {
     }
   }
 
-  // Update handlePopupOpen to fetch proposals
-  const handlePopupOpen = (pointId: string) => {
+  // Update handlePopupOpen to fetch proposals and address
+  const handlePopupOpen = async (pointId: string) => {
     setSelectedSpotId(pointId)
     fetchComments(pointId)
     fetchLikes(pointId)
     fetchReports(pointId)
     fetchProposals(pointId)
+
+    // Find the point in our points array
+    const point = points.find((p) => p.id === pointId)
+    if (point && !point.address) {
+      setIsLoadingAddress((prev) => ({ ...prev, [pointId]: true }))
+      try {
+        // Fetch address from coordinates
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.coordinates[0]}&lon=${point.coordinates[1]}&addressdetails=1`,
+          {
+            headers: {
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+          },
+        )
+
+        if (response.ok) {
+          const data = await response.json()
+          if (data.display_name) {
+            // Update the point with the address
+            setPoints((prevPoints) =>
+              prevPoints.map((p) => (p.id === pointId ? { ...p, address: data.display_name } : p)),
+            )
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching address:', error)
+      } finally {
+        setIsLoadingAddress((prev) => ({ ...prev, [pointId]: false }))
+      }
+    }
   }
 
   const handleImport = async () => {
@@ -1195,6 +1328,17 @@ export default function Map() {
       <div className="space-y-2">
         <h3 className="font-semibold">{point.name}</h3>
         <p className="text-sm text-gray-600">{point.type}</p>
+        {isLoadingAddress[point.id] ? (
+          <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
+            <Loader2 className="h-7 w-7 animate-spin" />
+          </div>
+        ) : (
+          point.address && (
+            <p className="text-sm text-gray-500">
+              <span className="font-medium">Address:</span> {point.address}
+            </p>
+          )
+        )}
 
         {activeSession && (
           <div className="mt-2 rounded-md bg-purple-50 p-2">
@@ -1373,7 +1517,7 @@ export default function Map() {
   return (
     <div className="flex h-screen flex-col">
       {/* Header Section */}
-      <div className="sticky top-0 z-[9999] border-b shadow-sm backdrop-blur-sm">
+      <div className="sticky top-0 border-b shadow-sm backdrop-blur-sm">
         <div className="container mx-auto px-2 py-1.5 sm:px-4 sm:py-2">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <div className="flex items-center gap-2">
@@ -1775,13 +1919,10 @@ export default function Map() {
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="name">Location Name</Label>
-              <Input
-                id="name"
+              <LocationNameInput
                 value={newPointName}
-                onChange={(e) => setNewPointName(e.target.value)}
-                placeholder="Enter location name"
-                required
-                className="w-full"
+                onChange={handleNameChange}
+                disabled={isAddingPoint}
               />
             </div>
             <div className="grid gap-2">
@@ -1789,6 +1930,7 @@ export default function Map() {
               <Select
                 value={newPointType}
                 onValueChange={(value: 'street' | 'park' | 'diy') => setNewPointType(value)}
+                disabled={isAddingPoint}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select type" />
@@ -1800,8 +1942,15 @@ export default function Map() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={handleAddPoint} className="w-full">
-              Add Location
+            <Button onClick={handleAddPoint} className="w-full" disabled={isAddingPoint}>
+              {isAddingPoint ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Adding Location...
+                </>
+              ) : (
+                'Add Location'
+              )}
             </Button>
           </div>
         </DialogContent>
@@ -1891,7 +2040,7 @@ export default function Map() {
                             onClick={() => handleUpdateReportStatus(report.id, 'accept')}
                             disabled={isUpdatingReport[report.id]}
                           >
-                            {isUpdatingReport[report.id] && 'accept' ? (
+                            {isUpdatingReport[report.id] ? (
                               <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                 Removing...
@@ -1906,7 +2055,7 @@ export default function Map() {
                             onClick={() => handleUpdateReportStatus(report.id, 'deny')}
                             disabled={isUpdatingReport[report.id]}
                           >
-                            {isUpdatingReport[report.id] && 'deny' ? (
+                            {isUpdatingReport[report.id] ? (
                               <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                 Denying...
