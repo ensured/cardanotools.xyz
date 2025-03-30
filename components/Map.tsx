@@ -306,13 +306,13 @@ const LocationNameInput = React.memo(
     disabled?: boolean
   }) => {
     const inputRef = useRef<HTMLInputElement>(null)
-    const lastValueRef = useRef(value)
+    const localValueRef = useRef(value)
 
-    // Update the input value when the prop changes
+    // Update local value when prop changes
     useEffect(() => {
-      if (inputRef.current && value !== lastValueRef.current) {
+      if (inputRef.current && value !== localValueRef.current) {
         inputRef.current.value = value
-        lastValueRef.current = value
+        localValueRef.current = value
       }
     }, [value])
 
@@ -321,10 +321,12 @@ const LocationNameInput = React.memo(
         ref={inputRef}
         id="name"
         defaultValue={value}
-        onChange={(e) => {
+        onBlur={(e) => {
           const newValue = e.target.value
-          lastValueRef.current = newValue
-          onChange(newValue)
+          if (newValue !== localValueRef.current) {
+            localValueRef.current = newValue
+            onChange(newValue)
+          }
         }}
         placeholder="Enter location name"
         required
