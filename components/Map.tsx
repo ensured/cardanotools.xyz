@@ -1658,14 +1658,21 @@ export default function Map() {
     const checkForUpdates = async () => {
       try {
         const response = await fetch('/api/points/last-update')
-        if (response.ok) {
-          const { lastUpdate } = await response.json()
-          const oldestPoint = Math.min(...pointsCache.current.map((p) => p.lastUpdated || 0))
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        const data = await response.json()
 
-          if (lastUpdate > oldestPoint) {
-            setIsCacheValid(false)
-            fetchPoints(true)
-          }
+        if (!data || typeof data.lastUpdate !== 'number') {
+          console.error('Invalid response format:', data)
+          return
+        }
+
+        const oldestPoint = Math.min(...pointsCache.current.map((p) => p.lastUpdated || 0))
+
+        if (data.lastUpdate > oldestPoint) {
+          setIsCacheValid(false)
+          fetchPoints(true)
         }
       } catch (error) {
         console.error('Error checking for updates:', error)
