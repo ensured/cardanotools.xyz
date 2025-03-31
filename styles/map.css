@@ -9,6 +9,7 @@
 .leaflet-popup-content-wrapper {
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
 }
 
 .leaflet-popup-content {
@@ -18,12 +19,11 @@
 
 /* Ensure controls are accessible on mobile */
 .leaflet-control-container {
-  z-index: 1;
+  z-index: 1000;
 }
 
 /* Style the attribution for better mobile display */
 .leaflet-control-attribution {
-  background: rgba(255, 255, 255, 0.8);
   padding: 4px 8px;
   font-size: 12px;
 }
@@ -31,6 +31,68 @@
 /* Ensure the dialog appears above the map */
 [role='dialog'] {
   z-index: 50;
+}
+
+/* Search results container styling */
+.search-results-container {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  border-radius: 0.5rem;
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  max-height: 250px;
+  overflow-y: auto;
+  display: block;
+  min-width: 300px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+/* Ensure the search input stays in place */
+[cmdk-input] {
+  position: relative;
+  z-index: 9999;
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  width: 100%;
+  outline: none;
+}
+
+/* Command group styling */
+[cmdk-group] {
+  display: block;
+  width: 100%;
+}
+
+[cmdk-item] {
+  display: flex;
+  align-items: flex-start;
+  padding: 0.5rem;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  gap: 0.5rem;
+  white-space: normal;
+  word-break: break-word;
+}
+
+[cmdk-item] svg {
+  flex-shrink: 0;
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+/* Command wrapper styling */
+.command {
+  position: relative;
+  z-index: 9999;
 }
 
 /* Marker icon styling */
@@ -88,6 +150,10 @@
   .custom-marker-icon img {
     width: 20px !important;
     height: 32px !important;
+  }
+
+  [cmdk-item] {
+    padding: 0.75rem;
   }
 }
 

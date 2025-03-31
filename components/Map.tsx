@@ -74,6 +74,8 @@ import { cn } from '@/lib/utils'
 import { MeetupDialog } from './MeetupDialog'
 import { MeetupsList } from './MeetupsList'
 import { createMeetup, getMeetups } from '@/app/actions/meetups'
+import { useVirtualizer } from '@tanstack/react-virtual'
+import MarkerClusterGroup from 'react-leaflet-cluster'
 
 // Fix for default marker icons in Next.js
 const icon = L.icon({
@@ -162,6 +164,15 @@ interface SearchResult {
   display_name: string
   lat: number
   lon: number
+  type?: string
+  address?: {
+    city?: string
+    town?: string
+    village?: string
+    suburb?: string
+    neighbourhood?: string
+    postcode?: string
+  }
 }
 
 interface EditProposal {
@@ -213,7 +224,7 @@ function LocationMarker({ onLocationSelect }: LocationMarkerProps) {
         !target.closest('.leaflet-control') &&
         !target.closest('.leaflet-bar') &&
         !target.closest('.location-display') &&
-        !target.closest('.cmdk-list') && // Add this to prevent clicks on search results
+        !target.closest('.search-results-container') && // Update this class name
         !target.closest('button') // Add this to prevent clicks on any button
       ) {
         onLocationSelect(e.latlng.lat, e.latlng.lng)
@@ -368,6 +379,298 @@ const LocationNameInput = React.memo(
 
 LocationNameInput.displayName = 'LocationNameInput'
 
+// Add this new component before the Map component
+const SearchResults = React.memo(
+  ({
+    results,
+    onSelect,
+    isLoading,
+  }: {
+    results: SearchResult[]
+    onSelect: (lat: number, lon: number) => void
+    isLoading: boolean
+  }) => {
+    const parentRef = useRef<HTMLDivElement>(null)
+    const rowVirtualizer = useVirtualizer({
+      count: results.length,
+      getScrollElement: () => parentRef.current,
+      estimateSize: () => 40,
+      overscan: 5,
+    })
+
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center py-4">
+          <Loader2 className="h-4 w-4 animate-spin" />
+        </div>
+      )
+    }
+
+    return (
+      <div ref={parentRef} className="h-[200px]">
+        <div
+          style={{
+            height: `${rowVirtualizer.getTotalSize()}px`,
+            width: '100%',
+            position: 'relative',
+          }}
+        >
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const result = results[virtualRow.index]
+            return (
+              <div
+                key={`${result.lat}-${result.lon}`}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <CommandItem
+                  value={result.display_name}
+                  onSelect={() => onSelect(result.lat, result.lon)}
+                  className="h-full cursor-pointer px-2 py-2 hover:bg-gray-100"
+                >
+                  <Search className="mt-1 h-4 w-4 shrink-0" />
+                  <span className="flex-1 whitespace-normal break-words">
+                    {result.display_name}
+                  </span>
+                </CommandItem>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  },
+)
+
+SearchResults.displayName = 'SearchResults'
+
+// Add this new component before the Map component
+const PopupContent = React.memo(
+  ({
+    point,
+    onPopupOpen,
+    onDelete,
+    onReport,
+    onEdit,
+    onLike,
+    onComment,
+    onMeetup,
+    isDeleting,
+    isReporting,
+    isLoadingAddress,
+    likes,
+    isLoadingLikes,
+    hasActiveSession,
+    user,
+    isAdmin,
+    proposals,
+    reports,
+  }: {
+    point: MapPoint
+    onPopupOpen: (id: string) => void
+    onDelete: (id: string) => void
+    onReport: (id: string) => void
+    onEdit: (point: MapPoint) => void
+    onLike: (id: string, status: 'like' | 'dislike' | null) => void
+    onComment: () => void
+    onMeetup: () => void
+    isDeleting: boolean
+    isReporting: boolean
+    isLoadingAddress: boolean
+    likes: LikeStatus[]
+    isLoadingLikes: boolean
+    hasActiveSession: boolean
+    user: any
+    isAdmin: boolean
+    proposals: EditProposal[]
+    reports: Report[]
+  }) => {
+    // Add function to generate Google Maps directions URL
+    const getGoogleMapsDirectionsUrl = () => {
+      const { coordinates } = point
+      return `https://www.google.com/maps/dir/?api=1&destination=${coordinates[0]},${coordinates[1]}`
+    }
+
+    return (
+      <div className="space-y-2">
+        <h3 className="font-semibold">{point.name}</h3>
+        <p className="text-sm text-gray-600">{point.type}</p>
+        {isLoadingAddress ? (
+          <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
+            <Loader2 className="h-7 w-7 animate-spin" />
+          </div>
+        ) : (
+          point.address && (
+            <p className="text-sm text-gray-500">
+              <span className="font-medium">Address:</span> {point.address}
+            </p>
+          )
+        )}
+
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={(e) => {
+              e.stopPropagation()
+              onMeetup()
+            }}
+          >
+            <div className="h-4 w-4 rounded-full bg-purple-500 text-purple-500"></div>
+            Skate Sessions
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            onClick={(e) => {
+              e.stopPropagation()
+              window.open(getGoogleMapsDirectionsUrl(), '_blank')
+            }}
+          >
+            <svg
+              className="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+              <path d="M12 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" />
+            </svg>
+            Directions
+          </Button>
+        </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-2 w-full"
+          onClick={(e) => {
+            e.stopPropagation()
+            onEdit(point)
+          }}
+        >
+          <Edit className="mr-1 h-4 w-4" />
+          Propose Edit
+        </Button>
+
+        {proposals?.filter((p) => p.status === 'pending').length > 0 && (
+          <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
+            <p className="text-sm text-yellow-800">⚠️ This spot has pending edit proposals</p>
+            <p className="mt-1 text-xs text-yellow-600">
+              {proposals.filter((p) => p.status === 'pending').length} proposal
+              {proposals.filter((p) => p.status === 'pending').length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        )}
+
+        {reports?.length > 0 && (
+          <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
+            <p className="text-sm text-yellow-800">⚠️ This spot has been reported for removal</p>
+            <p className="mt-1 text-xs text-yellow-600">
+              {reports.length} report{reports.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        )}
+
+        <div className="mt-2 flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`flex items-center gap-1 ${likes?.find((l) => l.userId === user?.id)?.status === 'like' ? 'text-green-500' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              onLike(
+                point.id,
+                likes?.find((l) => l.userId === user?.id)?.status === 'like' ? null : 'like',
+              )
+            }}
+            disabled={isLoadingLikes}
+          >
+            <ThumbsUp className="h-4 w-4" />
+            <span>{likes?.filter((l) => l.status === 'like').length || 0}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`flex items-center gap-1 ${likes?.find((l) => l.userId === user?.id)?.status === 'dislike' ? 'text-red-500' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              onLike(
+                point.id,
+                likes?.find((l) => l.userId === user?.id)?.status === 'dislike' ? null : 'dislike',
+              )
+            }}
+            disabled={isLoadingLikes}
+          >
+            <ThumbsDown className="h-4 w-4" />
+            <span>{likes?.filter((l) => l.status === 'dislike').length || 0}</span>
+          </Button>
+        </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-2 w-full"
+          onClick={(e) => {
+            e.stopPropagation()
+            onComment()
+          }}
+        >
+          Show Comments
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-2 w-full text-gray-500 hover:text-red-500"
+          onClick={(e) => {
+            e.stopPropagation()
+            onReport(point.id)
+          }}
+        >
+          <Flag className="mr-1 h-4 w-4" />
+          Report Spot
+        </Button>
+
+        {(point.createdBy === user!.primaryEmailAddress?.emailAddress || isAdmin) && (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="mt-2 w-full"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete(point.id)
+            }}
+            disabled={isDeleting}
+          >
+            {isDeleting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              'Delete Spot'
+            )}
+          </Button>
+        )}
+      </div>
+    )
+  },
+)
+
+PopupContent.displayName = 'PopupContent'
+
 export default function Map() {
   const { user, isLoaded } = useUser()
   const [points, setPoints] = useState<MapPoint[]>([])
@@ -413,6 +716,8 @@ export default function Map() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
+  const searchTimeoutRef = useRef<NodeJS.Timeout>()
+  const searchCache = useRef<Record<string, SearchResult[]>>({})
   const [open, setOpen] = useState(false)
   const [isEditProposalDialogOpen, setIsEditProposalDialogOpen] = useState(false)
   const [spotToEdit, setSpotToEdit] = useState<MapPoint | null>(null)
@@ -447,6 +752,60 @@ export default function Map() {
   const pointsCache = useRef<MapPoint[]>([])
   const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes in milliseconds
   const [isCacheValid, setIsCacheValid] = useState(true)
+  const [userState, setUserState] = useState<string | null>(null)
+  const [userStateBounds, setUserStateBounds] = useState<{
+    north: number
+    south: number
+    east: number
+    west: number
+  } | null>(null)
+  const mapMoveTimeoutRef = useRef<NodeJS.Timeout>()
+
+  // Add function to handle map move end
+  const handleMapMoveEnd = async () => {
+    if (!mapRef.current) return
+
+    const center = mapRef.current.getCenter()
+    const state = await getStateFromCoordinates(center.lat, center.lng)
+
+    if (state && state !== userState) {
+      setUserState(state)
+      const bounds = await getStateBounds(state)
+      if (bounds) {
+        setUserStateBounds(bounds)
+      }
+    }
+  }
+
+  // Add effect to handle map move events
+  useEffect(() => {
+    if (!mapRef.current) return
+
+    const handleMoveStart = () => {
+      // Clear any existing timeout
+      if (mapMoveTimeoutRef.current) {
+        clearTimeout(mapMoveTimeoutRef.current)
+      }
+    }
+
+    const handleMoveEnd = () => {
+      // Set a new timeout
+      mapMoveTimeoutRef.current = setTimeout(handleMapMoveEnd, 1500) // 1.5 seconds delay
+    }
+
+    mapRef.current.on('movestart', handleMoveStart)
+    mapRef.current.on('moveend', handleMoveEnd)
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.off('movestart', handleMoveStart)
+        mapRef.current.off('moveend', handleMoveEnd)
+      }
+      if (mapMoveTimeoutRef.current) {
+        clearTimeout(mapMoveTimeoutRef.current)
+      }
+    }
+  }, [mapRef.current])
 
   // Remove debounced handler and use direct state update
   const handleNameChange = (value: string) => {
@@ -486,13 +845,85 @@ export default function Map() {
     }
   }, [isMounted])
 
+  // Add function to get state from coordinates
+  const getStateFromCoordinates = async (lat: number, lon: number) => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1`,
+        {
+          headers: {
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+        },
+      )
+      if (response.ok) {
+        const data = await response.json()
+        // Check if address exists and has state property
+        if (data.address && data.address.state) {
+          return data.address.state
+        }
+        // If no state, try to get country or region
+        if (data.address && (data.address.country || data.address.region)) {
+          return data.address.country || data.address.region
+        }
+      }
+      return null
+    } catch (error) {
+      console.error('Error getting state:', error)
+      return null
+    }
+  }
+
+  // Add function to get state bounds
+  const getStateBounds = async (state: string) => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(state)}, USA&limit=1&addressdetails=1`,
+        {
+          headers: {
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+        },
+      )
+      if (response.ok) {
+        const data = await response.json()
+        if (data[0]) {
+          // Get the bounding box for the state
+          const bbox = data[0].boundingbox
+          return {
+            south: parseFloat(bbox[0]),
+            north: parseFloat(bbox[1]),
+            west: parseFloat(bbox[2]),
+            east: parseFloat(bbox[3]),
+          }
+        }
+      }
+      return null
+    } catch (error) {
+      console.error('Error getting state bounds:', error)
+      return null
+    }
+  }
+
+  // Update the geolocation effect to get state
   useEffect(() => {
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
-        (position) => {
+        async (position) => {
           const { latitude, longitude } = position.coords
           setUserLocation([latitude, longitude])
           setZoom(13) // Zoom in to city level
+
+          // Get user's state
+          const state = await getStateFromCoordinates(latitude, longitude)
+          if (state) {
+            setUserState(state)
+            // Get state bounds
+            const bounds = await getStateBounds(state)
+            if (bounds) {
+              setUserStateBounds(bounds)
+            }
+          }
         },
         (error) => {
           console.error('Error getting location:', error)
@@ -504,47 +935,81 @@ export default function Map() {
   // Update the search effect
   useEffect(() => {
     const searchLocation = async () => {
-      if (!searchQuery.trim()) {
+      if (!searchQuery.trim() || searchQuery.trim().length < 2) {
         setSearchResults([])
+        return
+      }
+
+      // Use simple query for cache key
+      const cacheKey = searchQuery.trim()
+      if (searchCache.current[cacheKey]) {
+        setSearchResults(searchCache.current[cacheKey])
         return
       }
 
       setIsSearching(true)
       try {
-        // Format the search query for postal codes
-        const formattedQuery = searchQuery.trim().match(/^\d{5}$/)
-          ? `${searchQuery}, Oregon, USA` // Add state and country for postal codes
-          : searchQuery.trim()
+        let query = searchQuery.trim()
+        let searchUrlParams = new URLSearchParams({
+          format: 'json',
+          q: query, // Use the direct query
+          limit: '20',
+          addressdetails: '1',
+          // Removed featuretype to allow broader matching (incl. zip codes etc.)
+          // featuretype: 'city,town,village,suburb,neighbourhood,landmark,locality,administrative',
+          extratags: '1',
+        })
 
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(formattedQuery)}&limit=5&addressdetails=1&countrycodes=us`,
-          {
-            headers: {
-              'Accept-Language': 'en-US,en;q=0.9',
-            },
+        // Removed all state/bounds determination and query modification logic
+
+        let searchUrl = `https://nominatim.openstreetmap.org/search?${searchUrlParams.toString()}`
+
+        // Remove temporary debug log
+        // console.log("Nominatim Search URL:", searchUrl);
+
+        const response = await fetch(searchUrl, {
+          headers: {
+            'Accept-Language': 'en-US,en;q=0.9',
           },
-        )
-        if (response.ok) {
-          const data = await response.json()
-          // Sort results to prioritize exact postal code matches
-          const sortedData = data.sort((a: any, b: any) => {
-            const aIsExactZip = a.address?.postcode === searchQuery.trim()
-            const bIsExactZip = b.address?.postcode === searchQuery.trim()
-            if (aIsExactZip && !bIsExactZip) return -1
-            if (!aIsExactZip && bIsExactZip) return 1
-            return 0
-          })
-          setSearchResults(sortedData)
+        })
+
+        if (!response.ok) {
+          throw new Error('Search failed')
         }
+
+        const data = await response.json()
+
+        // Let Nominatim handle the primary sorting by relevance
+        // Filter out duplicates based on display_name
+        const uniqueResults = data.filter(
+          (result: SearchResult, index: number, self: SearchResult[]) =>
+            index === self.findIndex((r: SearchResult) => r.display_name === result.display_name),
+        )
+
+        searchCache.current[cacheKey] = uniqueResults
+        setSearchResults(uniqueResults)
       } catch (error) {
         console.error('Error searching location:', error)
+        setSearchResults([])
+        toast.error('Failed to search location. Please try again.')
       } finally {
         setIsSearching(false)
       }
     }
 
-    // Execute search immediately when query changes
-    searchLocation()
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+
+    // Keep debounce reasonable
+    searchTimeoutRef.current = setTimeout(searchLocation, 300)
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current)
+      }
+    }
+    // Simplified dependencies: only trigger on query change
   }, [searchQuery])
 
   const handleLocationSelect = (lat: number, lon: number) => {
@@ -552,12 +1017,12 @@ export default function Map() {
     setIsDialogOpen(true)
   }
 
-  // Add new function for handling search result selection
+  // Add function to handle search result selection
   const handleSearchResultSelect = (lat: number, lon: number) => {
     setUserLocation([lat, lon])
     setZoom(13) // Zoom in to city level
-    setOpen(false) // Close the search dropdown
     setSearchQuery('') // Clear the search query
+    setSearchResults([]) // Clear results
   }
 
   // Add this new function for address lookup
@@ -1452,176 +1917,39 @@ export default function Map() {
     }
   }
 
-  // Update the renderPopupContent function
+  // Update the renderPopupContent function to use the memoized component
   const renderPopupContent = (point: MapPoint) => {
-    const activeSession = nearbySessions.find((session) => session.spotId === point.id)
-
     return (
-      <div className="space-y-2">
-        <h3 className="font-semibold">{point.name}</h3>
-        <p className="text-sm text-gray-600">{point.type}</p>
-        {isLoadingAddress[point.id] ? (
-          <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
-            <Loader2 className="h-7 w-7 animate-spin" />
-          </div>
-        ) : (
-          point.address && (
-            <p className="text-sm text-gray-500">
-              <span className="font-medium">Address:</span> {point.address}
-            </p>
-          )
-        )}
-
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1"
-            onClick={(e) => {
-              e.stopPropagation()
-              setSelectedSpotForMeetup({ id: point.id, name: point.name })
-              setIsMeetupsListDialogOpen(true)
-              // Fetch meetups for this spot
-              getMeetups(point.id).then(setMeetups)
-            }}
-          >
-            <div className="h-4 w-4 rounded-full bg-purple-500 text-purple-500"></div>
-            Skate Sessions
-          </Button>
-        </div>
-
-        {/* Edit Proposal Button */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-2 w-full"
-          onClick={(e) => {
-            e.stopPropagation()
-            setSpotToEdit(point)
-            setIsEditProposalDialogOpen(true)
-          }}
-        >
-          <Edit className="mr-1 h-4 w-4" />
-          Propose Edit
-        </Button>
-
-        {/* Pending Proposals */}
-        {proposals[point.id]?.filter((p) => p.status === 'pending').length > 0 && (
-          <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
-            <p className="text-sm text-yellow-800">⚠️ This spot has pending edit proposals</p>
-            <p className="mt-1 text-xs text-yellow-600">
-              {proposals[point.id].filter((p) => p.status === 'pending').length} proposal
-              {proposals[point.id].filter((p) => p.status === 'pending').length !== 1 ? 's' : ''}
-            </p>
-          </div>
-        )}
-
-        {/* Report Status */}
-        {reports[point.id]?.length > 0 && (
-          <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
-            <p className="text-sm text-yellow-800">⚠️ This spot has been reported for removal</p>
-            <p className="mt-1 text-xs text-yellow-600">
-              {reports[point.id].length} report
-              {reports[point.id].length !== 1 ? 's' : ''}
-            </p>
-          </div>
-        )}
-
-        {/* Likes Section */}
-        <div className="mt-2 flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`flex items-center gap-1 ${likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'like' ? 'text-green-500' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              handleLike(
-                point.id,
-                likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'like'
-                  ? null
-                  : 'like',
-              )
-            }}
-            disabled={isLoadingLikes[point.id]}
-          >
-            <ThumbsUp className="h-4 w-4" />
-            <span>{likes[point.id]?.filter((l) => l.status === 'like').length || 0}</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`flex items-center gap-1 ${likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'dislike' ? 'text-red-500' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              handleLike(
-                point.id,
-                likes[point.id]?.find((l) => l.userId === user?.id)?.status === 'dislike'
-                  ? null
-                  : 'dislike',
-              )
-            }}
-            disabled={isLoadingLikes[point.id]}
-          >
-            <ThumbsDown className="h-4 w-4" />
-            <span>{likes[point.id]?.filter((l) => l.status === 'dislike').length || 0}</span>
-          </Button>
-        </div>
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-2 w-full"
-          onClick={(e) => {
-            e.stopPropagation()
-            setIsCommentsDialogOpen(true)
-          }}
-        >
-          Show Comments (
-          {isLoadingComments[point.id] ? (
-            <Loader2 className="inline-block h-4 w-4 animate-spin" />
-          ) : (
-            comments[point.id]?.length || 0
-          )}
-          )
-        </Button>
-
-        {/* Report Button */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="mt-2 w-full text-gray-500 hover:text-red-500"
-          onClick={(e) => {
-            e.stopPropagation()
-            setSpotToReport(point.id)
-            setIsReportDialogOpen(true)
-          }}
-        >
-          <Flag className="mr-1 h-4 w-4" />
-          Report Spot
-        </Button>
-
-        {(point.createdBy === user!.primaryEmailAddress?.emailAddress || isAdmin) && (
-          <Button
-            variant="destructive"
-            size="sm"
-            className="mt-2 w-full"
-            onClick={(e) => {
-              e.stopPropagation()
-              handleDeletePoint(point.id)
-            }}
-            disabled={isDeletingPoint[point.id]}
-          >
-            {isDeletingPoint[point.id] ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Deleting...
-              </>
-            ) : (
-              'Delete Spot'
-            )}
-          </Button>
-        )}
-      </div>
+      <PopupContent
+        point={point}
+        onPopupOpen={handlePopupOpen}
+        onDelete={handleDeletePoint}
+        onReport={(id) => {
+          setSpotToReport(id)
+          setIsReportDialogOpen(true)
+        }}
+        onEdit={(point) => {
+          setSpotToEdit(point)
+          setIsEditProposalDialogOpen(true)
+        }}
+        onLike={handleLike}
+        onComment={() => setIsCommentsDialogOpen(true)}
+        onMeetup={() => {
+          setSelectedSpotForMeetup({ id: point.id, name: point.name })
+          setIsMeetupsListDialogOpen(true)
+          getMeetups(point.id).then(setMeetups)
+        }}
+        isDeleting={isDeletingPoint[point.id]}
+        isReporting={isReporting[point.id]}
+        isLoadingAddress={isLoadingAddress[point.id]}
+        likes={likes[point.id]}
+        isLoadingLikes={isLoadingLikes[point.id]}
+        hasActiveSession={nearbySessions.some((session) => session.spotId === point.id)}
+        user={user}
+        isAdmin={isAdmin}
+        proposals={proposals[point.id]}
+        reports={reports[point.id]}
+      />
     )
   }
 
@@ -1710,7 +2038,7 @@ export default function Map() {
   return (
     <div className="flex h-screen flex-col">
       {/* Header Section */}
-      <div className="sticky top-0 border-b shadow-sm backdrop-blur-sm">
+      <div className="sticky top-0 z-[1000] border-b shadow-sm backdrop-blur-sm">
         <div className="container mx-auto px-2 py-1.5 sm:px-4 sm:py-2">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <div className="flex items-center gap-2">
@@ -1719,36 +2047,53 @@ export default function Map() {
               </h1>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <div className="relative w-[250px]">
-                <Command className="rounded-lg border shadow-sm">
+              <div className="relative max-w-[100vw]">
+                <Command className="rounded-lg border shadow-sm" shouldFilter={false}>
                   <CommandInput
                     placeholder="Search for skate spots..."
                     value={searchQuery}
                     onValueChange={setSearchQuery}
                     className="h-10"
+                    disabled={isSearching}
                   />
                   {searchQuery && (
-                    <div className="absolute left-0 right-0 top-full z-[1000] mt-1">
-                      <CommandList className="max-h-[200px] w-full overflow-auto rounded-md bg-white shadow-md">
-                        <CommandEmpty>No location found.</CommandEmpty>
-                        <CommandGroup>
-                          {isSearching ? (
-                            <div className="flex items-center justify-center py-4">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            </div>
-                          ) : (
-                            searchResults.map((result) => (
+                    <div className="search-results-container absolute left-0 right-0 top-full z-[9999] mt-0.5 max-h-[250px] overflow-auto rounded-md border bg-background shadow-lg">
+                      <CommandList className="max-h-[250px] overflow-auto">
+                        {isSearching ? (
+                          <div className="flex items-center justify-center py-4">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          </div>
+                        ) : searchResults.length === 0 ? (
+                          <div className="py-4 text-center text-sm text-muted-foreground">
+                            No location found.
+                          </div>
+                        ) : (
+                          <CommandGroup>
+                            {searchResults.map((result) => (
                               <CommandItem
                                 key={`${result.lat}-${result.lon}`}
                                 value={result.display_name}
                                 onSelect={() => handleSearchResultSelect(result.lat, result.lon)}
+                                className="flex w-full cursor-pointer items-start gap-2 px-2 py-2 hover:bg-accent"
                               >
-                                <Search className="mr-2 h-4 w-4" />
-                                {result.display_name}
+                                <Search className="mt-1 h-4 w-4 shrink-0" />
+                                <div className="flex-1">
+                                  <div className="font-medium">
+                                    {result.address?.city ||
+                                      result.address?.town ||
+                                      result.address?.village ||
+                                      result.address?.suburb ||
+                                      result.address?.neighbourhood ||
+                                      'Location'}
+                                  </div>
+                                  <div className="text-sm text-muted-foreground">
+                                    {result.display_name}
+                                  </div>
+                                </div>
                               </CommandItem>
-                            ))
-                          )}
-                        </CommandGroup>
+                            ))}
+                          </CommandGroup>
+                        )}
                       </CommandList>
                     </div>
                   )}
@@ -1783,7 +2128,7 @@ export default function Map() {
             </div>
           </div>
           {showWelcomeMessage && (
-            <div className="bg-blue-50 text-blue-700 mt-4 rounded-lg p-3 text-sm">
+            <div className="bg-blue-50 mt-4 rounded-lg p-3 text-sm text-blue">
               <div className="flex items-start justify-between">
                 <p>
                   Welcome to SkateSpot! Find, add, and share your favorite skate spots. Click
@@ -1919,33 +2264,44 @@ export default function Map() {
               <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900"></div>
             </div>
           ) : (
-            points.map((point) => {
-              const hasActiveSession = nearbySessions.some((session) => session.spotId === point.id)
-              return (
-                <Marker
-                  key={point.id}
-                  position={point.coordinates}
-                  icon={createMarkerIcon(hasActiveSession)}
-                  eventHandlers={{
-                    popupopen: () => {
-                      handlePopupOpen(point.id)
-                    },
-                    add: (e) => {
-                      const markerElement = e.target.getElement()
-                      if (markerElement) {
-                        markerElement.setAttribute('data-lat', point.coordinates[0].toString())
-                        markerElement.setAttribute('data-lng', point.coordinates[1].toString())
-                        markerElement.setAttribute('data-spot-id', point.id)
-                      }
-                    },
-                  }}
-                >
-                  <Popup className="max-w-[90vw] md:max-w-[300px]">
-                    <div className="p-2">{renderPopupContent(point)}</div>
-                  </Popup>
-                </Marker>
-              )
-            })
+            <MarkerClusterGroup
+              chunkedLoading
+              maxClusterRadius={80}
+              spiderfyOnMaxZoom={true}
+              showCoverageOnHover={false}
+              zoomToBoundsOnClick={true}
+              disableClusteringAtZoom={16}
+            >
+              {points.map((point) => {
+                const hasActiveSession = nearbySessions.some(
+                  (session) => session.spotId === point.id,
+                )
+                return (
+                  <Marker
+                    key={point.id}
+                    position={point.coordinates}
+                    icon={createMarkerIcon(hasActiveSession)}
+                    eventHandlers={{
+                      popupopen: () => {
+                        handlePopupOpen(point.id)
+                      },
+                      add: (e) => {
+                        const markerElement = e.target.getElement()
+                        if (markerElement) {
+                          markerElement.setAttribute('data-lat', point.coordinates[0].toString())
+                          markerElement.setAttribute('data-lng', point.coordinates[1].toString())
+                          markerElement.setAttribute('data-spot-id', point.id)
+                        }
+                      },
+                    }}
+                  >
+                    <Popup className="max-w-[90vw] md:max-w-[300px]">
+                      <div className="p-2">{renderPopupContent(point)}</div>
+                    </Popup>
+                  </Marker>
+                )
+              })}
+            </MarkerClusterGroup>
           )}
         </MapContainer>
       </div>
