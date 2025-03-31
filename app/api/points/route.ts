@@ -1,6 +1,6 @@
 import { kv } from '@vercel/kv'
 import { NextResponse } from 'next/server'
-import { auth, currentUser } from '@clerk/nextjs/server'
+import { auth } from '@clerk/nextjs/server'
 
 interface MapPoint {
   id: string
@@ -10,6 +10,9 @@ interface MapPoint {
   createdBy: string
   lastUpdated?: number
 }
+
+// Cache duration in seconds (5 minutes)
+const CACHE_DURATION = 300
 
 // Rate limiting configuration
 const RATE_LIMIT_WINDOW = 45 * 60 * 1000 // 45 minutes in milliseconds
@@ -71,106 +74,60 @@ async function fetchPointsInBatches(keys: string[]): Promise<MapPoint[]> {
 
 export async function GET() {
   try {
-    const { userId } = await auth()
-
-    if (!userId) {
-      return new NextResponse('Unauthorized', { status: 401 })
-    }
-
     // Try to get from cache first
-    const cachedPoints = await kv.get<MapPoint[]>(CACHE_KEY)
+    const cachedPoints = await kv.get('points:all')
     if (cachedPoints) {
       return NextResponse.json(cachedPoints)
     }
 
-    // If not in cache, fetch from KV using batch operations
-    const keys = await kv.keys('point:*')
-    const points = await fetchPointsInBatches(keys)
+    // If not in cache, get all points
+    const points = await kv.hgetall('points')
 
-    // Cache the results without TTL
-    await kv.set(CACHE_KEY, points)
+    // Store in cache for future requests
+    await kv.set('points:all', points, { ex: CACHE_DURATION })
 
     return NextResponse.json(points)
   } catch (error) {
     console.error('Error fetching points:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    return NextResponse.json({ error: 'Failed to fetch points' }, { status: 500 })
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
     const { userId } = await auth()
-
     if (!userId) {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Check rate limit
-    const rateLimit = await checkRateLimit(userId)
-    if (!rateLimit.allowed) {
-      return new NextResponse(
-        JSON.stringify({
-          message: 'Rate limit exceeded',
-          remainingTime: rateLimit.remainingTime,
-        }),
-        { status: 429 },
-      )
-    }
+    const point = await req.json()
 
-    const body = await request.json()
-    const point: MapPoint = {
-      ...body,
-      createdBy: body.createdBy,
-      lastUpdated: Date.now(),
-    }
+    // Add the point to the hash
+    await kv.hset('points', { [point.id]: JSON.stringify(point) })
 
-    // Use pipeline for atomic operations
-    const pipeline = kv.pipeline()
-    pipeline.set(`point:${point.id}`, point)
-
-    // Get current cached points
-    const cachedPoints = await kv.get<MapPoint[]>(CACHE_KEY)
-    if (cachedPoints) {
-      // Update the cache with the new point
-      const updatedPoints = [...cachedPoints, point]
-      pipeline.set(CACHE_KEY, updatedPoints)
-    }
-
-    // Update last update timestamp
-    pipeline.set('points:last_update', Date.now())
-
-    await pipeline.exec()
+    // Invalidate the cache
+    await kv.del('points:all')
 
     return NextResponse.json(point)
   } catch (error) {
-    console.error('Error creating point:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error adding point:', error)
+    return NextResponse.json({ error: 'Failed to add point' }, { status: 500 })
   }
 }
 
 // Add a new endpoint to get last update timestamp
 export async function HEAD() {
   try {
-    const { userId } = await auth()
-
-    if (!userId) {
-      return new NextResponse('Unauthorized', { status: 401 })
-    }
-
-    // Get the last update timestamp from cache
-    const lastUpdate = await kv.get<number>('points:last_update')
-    if (!lastUpdate) {
-      return new NextResponse(null, { status: 404 })
-    }
-
+    const lastUpdate = (await kv.get('points:lastUpdate')) || Date.now()
     return new NextResponse(null, {
       status: 200,
       headers: {
-        'Last-Modified': new Date(lastUpdate).toUTCString(),
+        'Last-Update': lastUpdate.toString(),
+        'Content-Type': 'application/json',
       },
     })
   } catch (error) {
     console.error('Error getting last update:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    return new NextResponse(null, { status: 500 })
   }
 }

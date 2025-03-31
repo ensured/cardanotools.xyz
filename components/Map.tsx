@@ -501,7 +501,7 @@ export default function Map() {
     }
   }, [])
 
-  // Add debounced search function
+  // Update the search effect
   useEffect(() => {
     const searchLocation = async () => {
       if (!searchQuery.trim()) {
@@ -543,8 +543,8 @@ export default function Map() {
       }
     }
 
-    const timeoutId = setTimeout(searchLocation, 300)
-    return () => clearTimeout(timeoutId)
+    // Execute search immediately when query changes
+    searchLocation()
   }, [searchQuery])
 
   const handleLocationSelect = (lat: number, lon: number) => {
@@ -596,6 +596,23 @@ export default function Map() {
 
     setIsLoadingPoints(true)
     try {
+      // First check if we need to refresh
+      const lastUpdateResponse = await fetch('/api/points', { method: 'HEAD' })
+      if (lastUpdateResponse.ok) {
+        const lastUpdate = parseInt(
+          lastUpdateResponse.headers.get('Last-Update') || Date.now().toString(),
+        )
+        const oldestPoint = Math.min(...pointsCache.current.map((p) => p.lastUpdated || 0))
+
+        // If our cache is still valid, use it
+        if (lastUpdate <= oldestPoint && pointsCache.current.length > 0) {
+          setPoints(pointsCache.current)
+          setIsLoadingPoints(false)
+          return
+        }
+      }
+
+      // If we need to refresh, fetch new data
       const response = await fetch('/api/points')
       if (response.ok) {
         const data = await response.json()
@@ -1657,20 +1674,15 @@ export default function Map() {
 
     const checkForUpdates = async () => {
       try {
-        const response = await fetch('/api/points/last-update')
+        const response = await fetch('/api/points', { method: 'HEAD' })
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
-        const data = await response.json()
-
-        if (!data || typeof data.lastUpdate !== 'number') {
-          console.error('Invalid response format:', data)
-          return
-        }
+        const { lastUpdate } = await response.json()
 
         const oldestPoint = Math.min(...pointsCache.current.map((p) => p.lastUpdated || 0))
 
-        if (data.lastUpdate > oldestPoint) {
+        if (lastUpdate > oldestPoint) {
           setIsCacheValid(false)
           fetchPoints(true)
         }
@@ -1716,13 +1728,13 @@ export default function Map() {
                     className="h-10"
                   />
                   {searchQuery && (
-                    <div className="absolute left-0 right-0 top-full mt-1">
+                    <div className="absolute left-0 right-0 top-full z-[1000] mt-1">
                       <CommandList className="max-h-[200px] w-full overflow-auto rounded-md bg-white shadow-md">
                         <CommandEmpty>No location found.</CommandEmpty>
                         <CommandGroup>
                           {isSearching ? (
                             <div className="flex items-center justify-center py-4">
-                              <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-gray-900"></div>
+                              <Loader2 className="h-4 w-4 animate-spin" />
                             </div>
                           ) : (
                             searchResults.map((result) => (
