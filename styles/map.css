@@ -29,7 +29,7 @@
 }
 
 /* Ensure the dialog appears above the map */
-[role="dialog"] {
+[role='dialog'] {
   z-index: 50;
 }
 
@@ -44,12 +44,28 @@
   background-position: center !important;
 }
 
+/* Custom marker icon styling */
+.custom-marker-icon {
+  width: 25px !important;
+  height: 41px !important;
+  margin-left: -12px !important;
+  margin-top: -41px !important;
+}
+
+.custom-marker-icon img {
+  width: 25px !important;
+  height: 41px !important;
+  background-size: contain !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+}
+
 /* Mobile-specific adjustments */
 @media (max-width: 640px) {
   .leaflet-popup {
     max-width: 90vw;
   }
-  
+
   .leaflet-control-attribution {
     font-size: 10px;
     padding: 2px 4px;
@@ -60,6 +76,18 @@
     height: 32px !important;
     margin-left: -10px !important;
     margin-top: -32px !important;
+  }
+
+  .custom-marker-icon {
+    width: 20px !important;
+    height: 32px !important;
+    margin-left: -10px !important;
+    margin-top: -32px !important;
+  }
+
+  .custom-marker-icon img {
+    width: 20px !important;
+    height: 32px !important;
   }
 }
 
@@ -98,12 +126,23 @@
   .leaflet-control-layers {
     font-size: 12px;
   }
-  
+
   .leaflet-control-layers-expanded {
     padding: 4px 8px;
   }
-  
+
   .leaflet-control-layers-scrollbar {
     max-height: 150px;
   }
-} 
+}
+
+/* Session indicator styling */
+.session-indicator {
+  pointer-events: auto !important;
+  z-index: 1000 !important;
+}
+
+/* Ensure the marker image doesn't interfere with the session indicator */
+.custom-marker-icon img {
+  pointer-events: none !important;
+}

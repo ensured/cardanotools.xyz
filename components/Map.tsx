@@ -88,6 +88,28 @@ const icon = L.icon({
   tooltipAnchor: [0, -41],
 })
 
+// Create a custom marker icon with session indicator
+const createMarkerIcon = (hasActiveSession: boolean) => {
+  return L.divIcon({
+    className: 'custom-marker-icon',
+    html: `
+      <div class="relative">
+        <img src="/marker-icon.png" class="w-[25px] h-[41px]" />
+        ${
+          hasActiveSession
+            ? `
+          <div class="absolute left-1/2 top-[33.3%] -translate-x-1/2 -translate-y-1/2 w-[0.865rem] h-[0.865rem] bg-purple-500 rounded-full border-2 border-white cursor-pointer session-indicator"></div>
+        `
+            : ''
+        }
+      </div>
+    `,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+  })
+}
+
 // Set the default icon for all markers
 L.Marker.prototype.options.icon = icon
 
@@ -98,6 +120,7 @@ interface MapPoint {
   coordinates: [number, number]
   createdBy: string
   address?: string
+  lastUpdated?: number // Add this field to track updates
 }
 
 interface LocationMarkerProps {
@@ -165,6 +188,8 @@ interface NearbyMeetup {
   spotId: string
   spotName: string
   createdBy: string
+  createdByName: string
+  createdByEmail: string
   coordinates: [number, number]
   distance: number
 }
@@ -418,6 +443,10 @@ export default function Map() {
   const [isNearbySessionsDialogOpen, setIsNearbySessionsDialogOpen] = useState(false)
   const [isAddingPoint, setIsAddingPoint] = useState(false)
   const [isLoadingAddress, setIsLoadingAddress] = useState<Record<string, boolean>>({})
+  const [lastFetchTime, setLastFetchTime] = useState<number>(0)
+  const pointsCache = useRef<MapPoint[]>([])
+  const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes in milliseconds
+  const [isCacheValid, setIsCacheValid] = useState(true)
 
   // Remove debounced handler and use direct state update
   const handleNameChange = (value: string) => {
@@ -554,6 +583,87 @@ export default function Map() {
     }
   }
 
+  // Add function to fetch points with caching
+  const fetchPoints = async (forceRefresh = false) => {
+    const now = Date.now()
+    const shouldUseCache = !forceRefresh && isCacheValid && now - lastFetchTime < CACHE_DURATION
+
+    if (shouldUseCache && pointsCache.current.length > 0) {
+      setPoints(pointsCache.current)
+      setIsLoadingPoints(false)
+      return
+    }
+
+    setIsLoadingPoints(true)
+    try {
+      const response = await fetch('/api/points')
+      if (response.ok) {
+        const data = await response.json()
+        pointsCache.current = data
+        setPoints(data)
+        setLastFetchTime(now)
+        setIsCacheValid(true)
+      } else {
+        console.error('Failed to fetch points:', await response.text())
+      }
+    } catch (error) {
+      console.error('Error fetching points:', error)
+    } finally {
+      setIsLoadingPoints(false)
+    }
+  }
+
+  // Update useEffect to use the new fetchPoints function
+  useEffect(() => {
+    if (isMounted) {
+      fetchPoints()
+    }
+  }, [isMounted])
+
+  // Add function to handle point updates
+  const handlePointUpdate = async (newPoint: MapPoint) => {
+    // Optimistically update the UI
+    setPoints((prevPoints) => [...prevPoints, newPoint])
+    pointsCache.current = [...pointsCache.current, newPoint]
+
+    try {
+      const response = await fetch('/api/points', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newPoint),
+      })
+
+      if (!response.ok) {
+        // Revert optimistic update on error
+        setPoints((prevPoints) => prevPoints.filter((p) => p.id !== newPoint.id))
+        pointsCache.current = pointsCache.current.filter((p) => p.id !== newPoint.id)
+        if (response.status === 429) {
+          const errorData = await response.json()
+          const remainingMinutes = Math.ceil(errorData.remainingTime / (60 * 1000))
+          toast.error(
+            `You have reached the maximum number of points (5) you can add in 45 minutes. Please wait ${remainingMinutes} minutes before adding more.`,
+          )
+        } else {
+          const errorText = await response.text()
+          console.error('Failed to add point:', errorText)
+          toast.error('Failed to add point. Please try again.')
+        }
+      } else {
+        // Update the lastUpdated timestamp
+        newPoint.lastUpdated = Date.now()
+      }
+    } catch (error) {
+      // Revert optimistic update on error
+      setPoints((prevPoints) => prevPoints.filter((p) => p.id !== newPoint.id))
+      pointsCache.current = pointsCache.current.filter((p) => p.id !== newPoint.id)
+      console.error('Error adding point:', error)
+      toast.error('An error occurred. Please try again.')
+    }
+  }
+
+  // Update handleAddPoint to use the new handlePointUpdate function
   const handleAddPoint = async () => {
     if (!selectedLocation || !newPointName || !user || isAddingPoint) return
 
@@ -574,56 +684,20 @@ export default function Map() {
       createdBy: userEmail,
     }
 
-    // Optimistic update
-    setPoints((prevPoints) => [...prevPoints, newPoint])
+    // Start address lookup in the background
+    const addressPromise = lookupAddress(selectedLocation.lat, selectedLocation.lng)
+
+    // Update the point with the address once we have it
+    const address = await addressPromise
+    if (address) {
+      newPoint.address = address
+    }
+
+    await handlePointUpdate(newPoint)
     setNewPointName('')
     setSelectedLocation(null)
     setIsDialogOpen(false)
-
-    try {
-      // Start address lookup in the background
-      const addressPromise = lookupAddress(selectedLocation.lat, selectedLocation.lng)
-
-      // Save the point to the database
-      const saveResponse = await fetch('/api/points', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(newPoint),
-      })
-
-      if (!saveResponse.ok) {
-        // Revert optimistic update on error
-        setPoints((prevPoints) => prevPoints.filter((p) => p.id !== newPoint.id))
-        if (saveResponse.status === 429) {
-          const errorData = await saveResponse.json()
-          const remainingMinutes = Math.ceil(errorData.remainingTime / (60 * 1000))
-          toast.error(
-            `You have reached the maximum number of points (5) you can add in 45 minutes. Please wait ${remainingMinutes} minutes before adding more.`,
-          )
-        } else {
-          const errorText = await saveResponse.text()
-          console.error('Failed to add point:', errorText)
-          toast.error('Failed to add point. Please try again.')
-        }
-      } else {
-        // Update the point with the address once we have it
-        const address = await addressPromise
-        if (address) {
-          setPoints((prevPoints) =>
-            prevPoints.map((p) => (p.id === newPoint.id ? { ...p, address } : p)),
-          )
-        }
-      }
-    } catch (error) {
-      // Revert optimistic update on error
-      setPoints((prevPoints) => prevPoints.filter((p) => p.id !== newPoint.id))
-      console.error('Error adding point:', error)
-      toast.error('An error occurred. Please try again.')
-    } finally {
-      setIsAddingPoint(false)
-    }
+    setIsAddingPoint(false)
   }
 
   const handleDeletePoint = async (pointId: string) => {
@@ -632,6 +706,7 @@ export default function Map() {
     // Optimistic update
     setIsDeletingPoint((prev) => ({ ...prev, [pointId]: true }))
     setPoints((prevPoints) => prevPoints.filter((p) => p.id !== pointId))
+    pointsCache.current = pointsCache.current.filter((p) => p.id !== pointId)
 
     try {
       const response = await fetch(`/api/points/${pointId}`, {
@@ -643,14 +718,19 @@ export default function Map() {
         const deletedPoint = points.find((p) => p.id === pointId)
         if (deletedPoint) {
           setPoints((prevPoints) => [...prevPoints, deletedPoint])
+          pointsCache.current = [...pointsCache.current, deletedPoint]
         }
         toast.error('Failed to delete point. Please try again.')
+      } else {
+        // Invalidate cache on successful deletion
+        setIsCacheValid(false)
       }
     } catch (error) {
       // Revert optimistic update on error
       const deletedPoint = points.find((p) => p.id === pointId)
       if (deletedPoint) {
         setPoints((prevPoints) => [...prevPoints, deletedPoint])
+        pointsCache.current = [...pointsCache.current, deletedPoint]
       }
       console.error('Error deleting point:', error)
       toast.error('An error occurred. Please try again.')
@@ -1042,23 +1122,6 @@ export default function Map() {
   }
 
   useEffect(() => {
-    const fetchPoints = async () => {
-      setIsLoadingPoints(true)
-      try {
-        const response = await fetch('/api/points')
-        if (response.ok) {
-          const data = await response.json()
-          setPoints(data)
-        } else {
-          console.error('Failed to fetch points:', await response.text())
-        }
-      } catch (error) {
-        console.error('Error fetching points:', error)
-      } finally {
-        setIsLoadingPoints(false)
-      }
-    }
-
     // If user is admin, fetch admin data
     const fetchAdminData = async () => {
       if (isAdmin) {
@@ -1082,7 +1145,6 @@ export default function Map() {
       }
     }
 
-    fetchPoints()
     fetchAdminData()
   }, [isAdmin])
 
@@ -1301,6 +1363,36 @@ export default function Map() {
     }
   }, [])
 
+  // Add this function before the renderPopupContent function
+  const handleSessionRemoval = async (sessionId: string) => {
+    try {
+      // Optimistically update the UI
+      setNearbySessions((prev) => prev.filter((session) => session.id !== sessionId))
+      setMeetups((prev) => prev.filter((meetup) => meetup.id !== sessionId))
+
+      // Call the API to delete the session
+      const response = await fetch(`/api/meetups/${sessionId}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        // Revert optimistic update on error
+        const deletedSession = nearbySessions.find((session) => session.id === sessionId)
+        if (deletedSession) {
+          setNearbySessions((prev) => [...prev, deletedSession])
+          setMeetups((prev) => [...prev, deletedSession])
+        }
+        throw new Error('Failed to delete session')
+      }
+
+      toast.success('Session removed successfully')
+    } catch (error) {
+      console.error('Error removing session:', error)
+      toast.error('Failed to remove session')
+    }
+  }
+
+  // Update handleCreateMeetup to refresh both states
   const handleCreateMeetup = async (meetup: {
     title: string
     description: string
@@ -1309,20 +1401,37 @@ export default function Map() {
     spotName: string
   }) => {
     try {
-      await createMeetup({
+      const newMeetup = await createMeetup({
         ...meetup,
-        date: meetup.date.getTime(), // Convert Date to timestamp
+        date: meetup.date.getTime(),
         createdBy: user?.id || '',
+        createdByName: user?.firstName
+          ? `${user.firstName} ${user.lastName || ''}`.trim()
+          : 'Anonymous',
+        createdByEmail: user?.primaryEmailAddress?.emailAddress || '',
       })
-      // Refresh meetups list
-      const updatedMeetups = await getMeetups(meetup.spotId)
-      setMeetups(updatedMeetups)
+
+      // Update both states immediately
+      setMeetups((prev) => [...prev, newMeetup])
+
+      // If showing nearby sessions, update that state too
+      if (showNearbySessions) {
+        const nearbyMeetup: NearbyMeetup = {
+          ...newMeetup,
+          coordinates: points.find((p) => p.id === meetup.spotId)?.coordinates || [0, 0],
+          distance: 0, // This will be calculated by the server
+        }
+        setNearbySessions((prev) => [...prev, nearbyMeetup])
+      }
+
+      toast.success('Session created successfully')
     } catch (error) {
       console.error('Error creating meetup:', error)
+      toast.error('Failed to create session')
     }
   }
 
-  // Update popup content to include meetup button
+  // Update the renderPopupContent function
   const renderPopupContent = (point: MapPoint) => {
     const activeSession = nearbySessions.find((session) => session.spotId === point.id)
 
@@ -1342,16 +1451,6 @@ export default function Map() {
           )
         )}
 
-        {activeSession && (
-          <div className="mt-2 rounded-md bg-purple-50 p-2">
-            <h4 className="font-medium text-purple-900">Active Session</h4>
-            <p className="text-sm text-purple-700">{activeSession.title}</p>
-            <p className="text-xs text-purple-600">
-              {formatDistanceToNow(activeSession.date, { addSuffix: true })}
-            </p>
-          </div>
-        )}
-
         <div className="flex gap-2">
           <Button
             variant="outline"
@@ -1365,6 +1464,7 @@ export default function Map() {
               getMeetups(point.id).then(setMeetups)
             }}
           >
+            <div className="h-4 w-4 rounded-full bg-purple-500 text-purple-500"></div>
             Skate Sessions
           </Button>
         </div>
@@ -1503,6 +1603,74 @@ export default function Map() {
       </div>
     )
   }
+
+  // Add this effect before the return statement
+  useEffect(() => {
+    if (!mapRef.current) return
+
+    const handleClick = (e: L.LeafletMouseEvent) => {
+      const target = e.originalEvent.target as HTMLElement
+      if (target.classList.contains('session-indicator')) {
+        const markerElement = target.closest('.leaflet-marker-icon')
+        if (markerElement) {
+          const spotId = markerElement.getAttribute('data-spot-id')
+
+          if (spotId) {
+            const point = points.find((p) => p.id === spotId)
+            if (point) {
+              // Open the popup for the spot
+              const marker = mapRef.current
+                ?.getPane('overlayPane')
+                ?.querySelector(`[data-spot-id="${spotId}"]`)
+              if (marker) {
+                const popupContent = document.createElement('div')
+                const content = renderPopupContent(point)
+                if (content instanceof HTMLElement) {
+                  popupContent.appendChild(content)
+                } else {
+                  popupContent.innerHTML = content.toString()
+                }
+                const popup = L.popup()
+                  .setLatLng(point.coordinates)
+                  .setContent(popupContent)
+                  .openOn(mapRef.current!)
+              }
+            }
+          }
+        }
+      }
+    }
+
+    mapRef.current.on('click', handleClick)
+    return () => {
+      mapRef.current?.off('click', handleClick)
+    }
+  }, [points])
+
+  // Add effect to periodically check for updates
+  useEffect(() => {
+    if (!isMounted) return
+
+    const checkForUpdates = async () => {
+      try {
+        const response = await fetch('/api/points/last-update')
+        if (response.ok) {
+          const { lastUpdate } = await response.json()
+          const oldestPoint = Math.min(...pointsCache.current.map((p) => p.lastUpdated || 0))
+
+          if (lastUpdate > oldestPoint) {
+            setIsCacheValid(false)
+            fetchPoints(true)
+          }
+        }
+      } catch (error) {
+        console.error('Error checking for updates:', error)
+      }
+    }
+
+    const interval = setInterval(checkForUpdates, CACHE_DURATION)
+    return () => clearInterval(interval)
+  }, [isMounted])
 
   if (!isLoaded || !isMounted) {
     return (
@@ -1691,48 +1859,34 @@ export default function Map() {
                   <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900"></div>
                 </div>
               ) : (
-                nearbySessions.map((session) => (
-                  <Marker
-                    key={session.id}
-                    position={session.coordinates}
-                    icon={L.divIcon({
-                      className: 'nearby-session-marker',
-                      html: `<div class="relative">
-                        <div class="absolute -bottom-5 left-1/2 -translate-x-1/2 bg-green-500 w-3 h-3 rounded-full"></div>
-                      </div>`,
-                      iconSize: [16, 16],
-                      iconAnchor: [6, 6],
-                    })}
-                  >
-                    <Popup>
-                      <div className="p-2">
-                        <h3 className="font-semibold">{session.title}</h3>
-                        <p className="text-sm text-gray-600">{session.description}</p>
-                        <p className="mt-2 text-sm text-gray-500">
-                          {formatDistanceToNow(session.date, { addSuffix: true })}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          {(session.distance * 0.621371).toFixed(1)} miles away
-                        </p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="mt-2 w-full"
-                          onClick={() => {
-                            setSelectedSpotForMeetup({
-                              id: session.spotId,
-                              name: session.spotName,
-                            })
-                            setIsMeetupsListDialogOpen(true)
-                            getMeetups(session.spotId).then(setMeetups)
-                          }}
-                        >
-                          View Details
-                        </Button>
-                      </div>
-                    </Popup>
-                  </Marker>
-                ))
+                nearbySessions.map((session) => {
+                  const point = points.find((p) => p.id === session.spotId)
+                  if (!point) return null
+                  return (
+                    <Marker
+                      key={session.id}
+                      position={session.coordinates}
+                      icon={createMarkerIcon(true)}
+                      eventHandlers={{
+                        popupopen: () => {
+                          handlePopupOpen(point.id)
+                        },
+                        add: (e) => {
+                          const markerElement = e.target.getElement()
+                          if (markerElement) {
+                            markerElement.setAttribute('data-lat', point.coordinates[0].toString())
+                            markerElement.setAttribute('data-lng', point.coordinates[1].toString())
+                            markerElement.setAttribute('data-spot-id', point.id)
+                          }
+                        },
+                      }}
+                    >
+                      <Popup className="max-w-[90vw] md:max-w-[300px]">
+                        <div className="p-2">{renderPopupContent(point)}</div>
+                      </Popup>
+                    </Marker>
+                  )
+                })
               )}
             </>
           )}
@@ -1742,22 +1896,33 @@ export default function Map() {
               <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900"></div>
             </div>
           ) : (
-            points.map((point) => (
-              <Marker
-                key={point.id}
-                position={point.coordinates}
-                icon={icon}
-                eventHandlers={{
-                  popupopen: () => {
-                    handlePopupOpen(point.id)
-                  },
-                }}
-              >
-                <Popup className="max-w-[90vw] md:max-w-[300px]">
-                  <div className="p-2">{renderPopupContent(point)}</div>
-                </Popup>
-              </Marker>
-            ))
+            points.map((point) => {
+              const hasActiveSession = nearbySessions.some((session) => session.spotId === point.id)
+              return (
+                <Marker
+                  key={point.id}
+                  position={point.coordinates}
+                  icon={createMarkerIcon(hasActiveSession)}
+                  eventHandlers={{
+                    popupopen: () => {
+                      handlePopupOpen(point.id)
+                    },
+                    add: (e) => {
+                      const markerElement = e.target.getElement()
+                      if (markerElement) {
+                        markerElement.setAttribute('data-lat', point.coordinates[0].toString())
+                        markerElement.setAttribute('data-lng', point.coordinates[1].toString())
+                        markerElement.setAttribute('data-spot-id', point.id)
+                      }
+                    },
+                  }}
+                >
+                  <Popup className="max-w-[90vw] md:max-w-[300px]">
+                    <div className="p-2">{renderPopupContent(point)}</div>
+                  </Popup>
+                </Marker>
+              )
+            })
           )}
         </MapContainer>
       </div>
@@ -2234,7 +2399,13 @@ export default function Map() {
           }}
           spotId={selectedSpotForMeetup.id}
           spotName={selectedSpotForMeetup.name}
-          onCreateMeetup={handleCreateMeetup}
+          onCreateMeetup={async (meetup) => {
+            try {
+              await handleCreateMeetup(meetup)
+            } catch (error) {
+              console.error('Error creating meetup:', error)
+            }
+          }}
         />
       )}
 
@@ -2288,7 +2459,9 @@ export default function Map() {
                   <Card key={session.id} className="mb-4">
                     <CardHeader>
                       <CardTitle className="text-lg">{session.title}</CardTitle>
-                      <CardDescription>{session.spotName}</CardDescription>
+                      <CardDescription>
+                        {session.spotName} • Created by {session.createdByName}
+                      </CardDescription>
                     </CardHeader>
                     <CardContent>
                       <p className="text-sm text-muted-foreground">{session.description}</p>

@@ -9,7 +9,10 @@ interface MapPoint {
   type: 'street' | 'park' | 'diy'
   coordinates: [number, number]
   createdBy: string
+  lastUpdated?: number
 }
+
+const CACHE_KEY = 'points:all'
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -39,8 +42,12 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       return new NextResponse('Unauthorized', { status: 403 })
     }
 
-    // Delete the point
-    await kv.del(`point:${params.id}`)
+    // Use pipeline for atomic operations
+    const pipeline = kv.pipeline()
+    pipeline.del(`point:${params.id}`)
+    pipeline.del(CACHE_KEY)
+    pipeline.set('points:last_update', Date.now())
+    await pipeline.exec()
 
     return new NextResponse(null, { status: 204 })
   } catch (error) {

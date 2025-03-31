@@ -27,6 +27,7 @@ interface Meetup {
   createdByEmail: string
   createdAt: number
   participants: string[]
+  createdByName: string
 }
 
 interface MeetupsListProps {
@@ -163,38 +164,37 @@ export function MeetupsList({ spotId, meetups, onMeetupsChange }: MeetupsListPro
         const canDelete = user && (meetup.createdBy === user.id || isAdmin)
         const canEdit = user && meetup.createdBy === user.id
         return (
-          <Card key={meetup.id}>
+          <Card key={meetup.id} className="mb-4">
             <CardHeader>
               <div className="flex items-start justify-between">
-                <CardTitle className="text-lg">{meetup.title}</CardTitle>
-                <div className="flex gap-2">
-                  {canEdit && (
+                <div>
+                  <CardTitle className="text-lg">{meetup.title}</CardTitle>
+                  <p className="text-sm text-gray-500">Created by {meetup.createdByName}</p>
+                </div>
+                {(meetup.createdBy === user?.id || isAdmin) && (
+                  <div className="flex gap-2">
                     <Button
                       variant="ghost"
-                      size="icon"
+                      size="sm"
                       className="text-blue-500 hover:text-blue-700"
                       onClick={() => handleEdit(meetup)}
                       disabled={isEditing[meetup.id]}
                     >
-                      <Edit2 className="h-4 w-4" />
+                      <Edit2 className="mr-1 h-4 w-4" />
+                      Edit
                     </Button>
-                  )}
-                  {canDelete && (
                     <Button
                       variant="ghost"
-                      size="icon"
+                      size="sm"
                       className="text-red-500 hover:text-red-700"
                       onClick={() => handleDelete(meetup.id)}
                       disabled={isDeleting[meetup.id]}
                     >
-                      {isDeleting[meetup.id] ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
+                      <Trash2 className="mr-1 h-4 w-4" />
+                      Delete
                     </Button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </CardHeader>
             <CardContent>

@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth, currentUser } from '@clerk/nextjs/server'
 import { kv } from '@vercel/kv'
 
 export interface Meetup {
@@ -11,6 +11,8 @@ export interface Meetup {
   spotId: string
   spotName: string
   createdBy: string
+  createdByName: string
+  createdByEmail: string
   participants: string[]
   createdAt: number
 }
@@ -21,6 +23,9 @@ export async function createMeetupServer(
   const { userId } = await auth()
   if (!userId) throw new Error('Unauthorized')
 
+  const user = await currentUser()
+  if (!user) throw new Error('User not found')
+
   const id = crypto.randomUUID()
   const now = Date.now()
 
@@ -30,6 +35,8 @@ export async function createMeetupServer(
     createdAt: now,
     participants: [userId],
     createdBy: userId,
+    createdByName: user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : 'Anonymous',
+    createdByEmail: user.emailAddresses[0]?.emailAddress || '',
   }
 
   await kv.set(`meetup:${id}`, newMeetup)
