@@ -911,6 +911,7 @@ export default function Map() {
           const { latitude, longitude } = position.coords
           setUserLocation([latitude, longitude])
           setZoom(13) // Zoom in to city level
+          setShowNearbySessions(true) // Automatically show sessions on load/location found
 
           // Get user's state
           const state = await getStateFromCoordinates(latitude, longitude)
@@ -2195,7 +2196,7 @@ export default function Map() {
               }}
             >
               <Users className="h-4 w-4" />
-              {showNearbySessions ? 'Hide Sessions' : 'Show Sessions'}
+              {showNearbySessions ? 'Hide nearby sessions' : 'Show nearby sessions'}
             </Button>
             <Select
               value={mapType}
