@@ -15,7 +15,6 @@ interface MapPoint {
 const RATE_LIMIT_WINDOW = 45 * 60 * 1000 // 45 minutes in milliseconds
 const MAX_POINTS_PER_WINDOW = 5 // Maximum points per 45 minutes
 const CACHE_KEY = 'points:all'
-const CACHE_TTL = 60 // Cache for 1 minute
 const BATCH_SIZE = 100 // Number of points to process in each batch
 
 // Helper function to calculate distance between two points
@@ -88,8 +87,8 @@ export async function GET() {
     const keys = await kv.keys('point:*')
     const points = await fetchPointsInBatches(keys)
 
-    // Cache the results
-    await kv.set(CACHE_KEY, points, { ex: CACHE_TTL })
+    // Cache the results without TTL
+    await kv.set(CACHE_KEY, points)
 
     return NextResponse.json(points)
   } catch (error) {
@@ -128,7 +127,18 @@ export async function POST(request: Request) {
     // Use pipeline for atomic operations
     const pipeline = kv.pipeline()
     pipeline.set(`point:${point.id}`, point)
-    pipeline.del(CACHE_KEY)
+
+    // Get current cached points
+    const cachedPoints = await kv.get<MapPoint[]>(CACHE_KEY)
+    if (cachedPoints) {
+      // Update the cache with the new point
+      const updatedPoints = [...cachedPoints, point]
+      pipeline.set(CACHE_KEY, updatedPoints)
+    }
+
+    // Update last update timestamp
+    pipeline.set('points:last_update', Date.now())
+
     await pipeline.exec()
 
     return NextResponse.json(point)

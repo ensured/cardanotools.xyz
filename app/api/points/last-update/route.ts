@@ -1,16 +1,23 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { kv } from '@vercel/kv'
 
 export async function GET() {
   try {
-    // Get the most recent lastUpdated timestamp from all points
-    const result = await db.query('SELECT MAX(last_updated) as last_update FROM points')
+    // Get the last update timestamp from KV
+    const lastUpdate = await kv.get<number>('points:last_update')
 
-    const lastUpdate = result.rows[0]?.last_update || Date.now()
+    if (!lastUpdate) {
+      return new NextResponse(null, { status: 404 })
+    }
 
-    return NextResponse.json({ lastUpdate })
+    return new NextResponse(null, {
+      status: 200,
+      headers: {
+        'Last-Modified': new Date(lastUpdate).toUTCString(),
+      },
+    })
   } catch (error) {
-    console.error('Error fetching last update:', error)
-    return NextResponse.json({ error: 'Failed to fetch last update' }, { status: 500 })
+    console.error('Error getting last update:', error)
+    return new NextResponse('Internal Server Error', { status: 500 })
   }
 }

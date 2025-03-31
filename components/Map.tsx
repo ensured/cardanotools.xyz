@@ -724,6 +724,10 @@ export default function Map() {
       } else {
         // Invalidate cache on successful deletion
         setIsCacheValid(false)
+        toast.success('Spot deleted successfully')
+
+        // Force a refresh of the points
+        fetchPoints(true)
       }
     } catch (error) {
       // Revert optimistic update on error

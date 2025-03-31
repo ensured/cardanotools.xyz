@@ -12,6 +12,20 @@ interface MapPoint {
   lastUpdated?: number
 }
 
+interface Meetup {
+  id: string
+  title: string
+  description: string
+  date: number
+  spotId: string
+  spotName: string
+  createdBy: string
+  createdByName: string
+  createdByEmail: string
+  participants: string[]
+  createdAt: number
+}
+
 const CACHE_KEY = 'points:all'
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -42,11 +56,48 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       return new NextResponse('Unauthorized', { status: 403 })
     }
 
+    // Get all meetups for this spot
+    const meetupIds = await kv.lrange(`spot:${params.id}:meetups`, 0, -1)
+
+    // Get current cached points
+    const cachedPoints = await kv.get<MapPoint[]>(CACHE_KEY)
+
     // Use pipeline for atomic operations
     const pipeline = kv.pipeline()
+
+    // Delete the point
     pipeline.del(`point:${params.id}`)
-    pipeline.del(CACHE_KEY)
+
+    // Update the cache by removing the deleted point
+    if (cachedPoints) {
+      const updatedPoints = cachedPoints.filter((p) => p.id !== params.id)
+      pipeline.set(CACHE_KEY, updatedPoints)
+    }
+
+    // Update last update timestamp
     pipeline.set('points:last_update', Date.now())
+
+    // Delete all meetups and their references
+    for (const meetupId of meetupIds) {
+      const meetup = await kv.get<Meetup>(`meetup:${meetupId}`)
+      if (meetup) {
+        // Delete the meetup
+        pipeline.del(`meetup:${meetupId}`)
+
+        // Remove meetup from spot's list
+        pipeline.lrem(`spot:${params.id}:meetups`, 0, meetupId)
+
+        // Remove meetup from creator's list
+        pipeline.lrem(`user:${meetup.createdBy}:meetups`, 0, meetupId)
+
+        // Remove meetup from all participants' lists
+        for (const participantId of meetup.participants) {
+          pipeline.lrem(`user:${participantId}:meetups`, 0, meetupId)
+        }
+      }
+    }
+
+    // Execute all operations atomically
     await pipeline.exec()
 
     return new NextResponse(null, { status: 204 })
