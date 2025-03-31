@@ -69,8 +69,6 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { cn } from '@/lib/utils'
 import { MeetupDialog } from './MeetupDialog'
 import { MeetupsList } from './MeetupsList'
 import { createMeetup, getMeetups } from '@/app/actions/meetups'
@@ -950,17 +948,25 @@ export default function Map() {
       setIsSearching(true)
       try {
         let query = searchQuery.trim()
-        let searchUrlParams = new URLSearchParams({
-          format: 'json',
-          q: query, // Use the direct query
-          limit: '20',
-          addressdetails: '1',
-          // Removed featuretype to allow broader matching (incl. zip codes etc.)
-          // featuretype: 'city,town,village,suburb,neighbourhood,landmark,locality,administrative',
-          extratags: '1',
-        })
+        const isZipCode = /^\d{5}(-\d{4})?$/.test(query) // Regex for US zip codes (5 or 5+4 digits)
 
-        // Removed all state/bounds determination and query modification logic
+        let searchUrlParams = new URLSearchParams()
+
+        if (isZipCode) {
+          // Use structured query for zip codes
+          searchUrlParams.set('format', 'json')
+          searchUrlParams.set('postalcode', query)
+          searchUrlParams.set('country', 'USA') // Assume US zip codes for now
+          searchUrlParams.set('limit', '5') // Limit results for zip codes, usually only one expected
+          searchUrlParams.set('addressdetails', '1')
+        } else {
+          // Use general query for other searches
+          searchUrlParams.set('format', 'json')
+          searchUrlParams.set('q', query)
+          searchUrlParams.set('limit', '20')
+          searchUrlParams.set('addressdetails', '1')
+          searchUrlParams.set('extratags', '1')
+        }
 
         let searchUrl = `https://nominatim.openstreetmap.org/search?${searchUrlParams.toString()}`
 
