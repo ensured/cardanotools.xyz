@@ -10,12 +10,14 @@ export interface Comment {
   id: string
   content: string
   createdBy: string
+  createdByName: string
   createdAt: number
   updatedAt?: number
 }
 
 export interface LikeStatus {
-  userId: string
+  email: string
+  name: string
   status: 'like' | 'dislike' | null
 }
 
@@ -29,12 +31,13 @@ export interface Report {
 
 export interface AdminReport {
   id: string
+  status: 'pending' | 'reviewed' | 'resolved'
   userId: string
+  spotId: string
+  userEmail: string
   reason: string
   createdAt: number
-  status: 'pending' | 'reviewed' | 'resolved'
-  spotId: string
-  spotName: string
+  adminNotes?: string
 }
 
 export interface SearchResult {

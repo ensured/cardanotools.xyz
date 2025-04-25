@@ -22,20 +22,16 @@ export async function checkUserAuthentication() {
   return user?.emailAddresses[0].emailAddress
 }
 
-// @ts-ignore
-export async function removeItemsFirebase(userEmail, keys) {
+export async function removeItemsFirebase(userEmail: string, keys: string[]) {
   if (!userEmail) {
     return { error: 'User email is required' }
   }
 
   // remove all keys from firebase db
   const res = await Promise.all(
-    // @ts-ignore
     keys.map(async (key) => {
       try {
-        // @ts-ignore
         const imageFileRef = storageRef(storage, `images/${userEmail}/${key}`)
-        // @ts-ignore
         await deleteObject(imageFileRef)
       } catch (error) {
         return { error: 'Error deleting item from favorites' }

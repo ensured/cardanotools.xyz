@@ -1,6 +1,7 @@
 import { kv } from '@vercel/kv'
 import { NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { auth, currentUser } from '@clerk/nextjs/server'
+import { v7 as uuidv7 } from 'uuid'
 
 interface MapPoint {
   id: string
@@ -11,82 +12,34 @@ interface MapPoint {
   lastUpdated?: number
 }
 
-// Cache duration in seconds (5 minutes)
-const CACHE_DURATION = 300
-
-// Rate limiting configuration
-const RATE_LIMIT_WINDOW = 45 * 60 * 1000 // 45 minutes in milliseconds
-const MAX_POINTS_PER_WINDOW = 5 // Maximum points per 45 minutes
-const CACHE_KEY = 'points:all'
-const BATCH_SIZE = 100 // Number of points to process in each batch
-
-// Helper function to calculate distance between two points
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371 // Earth's radius in km
-  const dLat = (lat2 - lat1) * (Math.PI / 180)
-  const dLon = (lon2 - lon1) * (Math.PI / 180)
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * (Math.PI / 180)) *
-      Math.cos(lat2 * (Math.PI / 180)) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  return R * c
-}
-
-async function checkRateLimit(
-  userId: string,
-): Promise<{ allowed: boolean; remainingTime?: number }> {
-  const key = `rate_limit:${userId}`
-  const now = Date.now()
-
-  // Get existing points in the time window
-  const points = (await kv.get<{ timestamp: number }[]>(key)) || []
-
-  // Filter out old points
-  const recentPoints = points.filter((p) => now - p.timestamp < RATE_LIMIT_WINDOW)
-
-  if (recentPoints.length >= MAX_POINTS_PER_WINDOW) {
-    // Calculate remaining time based on oldest point
-    const oldestPoint = Math.min(...recentPoints.map((p) => p.timestamp))
-    const remainingTime = RATE_LIMIT_WINDOW - (now - oldestPoint)
-    return { allowed: false, remainingTime }
-  }
-
-  // Add new point
-  recentPoints.push({ timestamp: now })
-  await kv.set(key, recentPoints, { ex: 2700 }) // Expire after 45 minutes
-
-  return { allowed: true }
-}
-
-// Helper function to fetch points in batches
-async function fetchPointsInBatches(keys: string[]): Promise<MapPoint[]> {
-  const points: MapPoint[] = []
-  for (let i = 0; i < keys.length; i += BATCH_SIZE) {
-    const batch = keys.slice(i, i + BATCH_SIZE)
-    const batchPoints = await kv.mget<MapPoint[]>(batch)
-    points.push(...batchPoints.filter((p): p is MapPoint => p !== null))
-  }
-  return points
-}
+// Cache duration in seconds (1 hour)
+const CACHE_DURATION = 3600
 
 export async function GET() {
   try {
-    // Try to get from cache first
-    const cachedPoints = await kv.get('points:all')
-    if (cachedPoints) {
-      return NextResponse.json(cachedPoints)
+    // Get all point IDs
+    const pointIds = await kv.lrange('points:ids', 0, -1)
+
+    if (!pointIds || pointIds.length === 0) {
+      return NextResponse.json([])
     }
 
-    // If not in cache, get all points
-    const points = await kv.hgetall('points')
+    // Fetch all points in parallel with proper error handling
+    const pointPromises = pointIds.map(async (id) => {
+      try {
+        return await kv.get<MapPoint>(`point:${id}`)
+      } catch (error) {
+        console.error(`Error fetching point ${id}:`, error)
+        return null
+      }
+    })
 
-    // Store in cache for future requests
-    await kv.set('points:all', points, { ex: CACHE_DURATION })
+    const points = await Promise.all(pointPromises)
 
-    return NextResponse.json(points)
+    // Filter out any null values and return
+    const validPoints = points.filter((point): point is MapPoint => point !== null)
+
+    return NextResponse.json(validPoints)
   } catch (error) {
     console.error('Error fetching points:', error)
     return NextResponse.json({ error: 'Failed to fetch points' }, { status: 500 })
@@ -100,15 +53,57 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Get user's email using clerk's currentUser
+    const user = await currentUser()
+    const userEmail = user?.emailAddresses[0]?.emailAddress
+
+    if (!userEmail) {
+      return NextResponse.json({ error: 'No email address found for user' }, { status: 400 })
+    }
+
     const point = await req.json()
 
-    // Add the point to the hash
-    await kv.hset('points', { [point.id]: JSON.stringify(point) })
+    // Validate required fields
+    if (!point.name || !point.type || !point.coordinates) {
+      return NextResponse.json(
+        { error: 'Missing required fields: name, type, or coordinates' },
+        { status: 400 },
+      )
+    }
 
-    // Invalidate the cache
-    await kv.del('points:all')
+    // Always generate a new UUID v7 for the point
+    point.id = uuidv7()
+    point.lastUpdated = Date.now()
 
-    return NextResponse.json(point)
+    // Set createdBy to user email instead of ID
+    point.createdBy = userEmail
+
+    // Ensure coordinates are in the correct format
+    if (!Array.isArray(point.coordinates) || point.coordinates.length !== 2) {
+      return NextResponse.json(
+        { error: 'Coordinates must be an array with exactly 2 numbers' },
+        { status: 400 },
+      )
+    }
+
+    try {
+      // Use pipeline for atomic operations
+      const pipeline = kv.pipeline()
+
+      // Store the point with infinite expiration (no ex parameter)
+      pipeline.set(`point:${point.id}`, point)
+
+      // Add to points list
+      pipeline.lpush('points:ids', point.id)
+
+      // Execute all operations atomically
+      await pipeline.exec()
+
+      return NextResponse.json(point)
+    } catch (error) {
+      console.error('Error storing point data:', error)
+      return NextResponse.json({ error: 'Failed to store point data in database' }, { status: 500 })
+    }
   } catch (error) {
     console.error('Error adding point:', error)
     return NextResponse.json({ error: 'Failed to add point' }, { status: 500 })
@@ -118,12 +113,42 @@ export async function POST(req: Request) {
 // Add a new endpoint to get last update timestamp
 export async function HEAD() {
   try {
-    const lastUpdate = (await kv.get('points:lastUpdate')) || Date.now()
+    const pointIds = await kv.lrange('points:ids', 0, -1)
+
+    if (!pointIds || pointIds.length === 0) {
+      return new NextResponse(null, {
+        status: 200,
+        headers: {
+          'Last-Update': '0',
+          'Content-Type': 'application/json',
+        },
+      })
+    }
+
+    // Fetch all points in parallel
+    const pointPromises = pointIds.map(async (id) => {
+      try {
+        return await kv.get<MapPoint>(`point:${id}`)
+      } catch (error) {
+        console.error(`Error fetching point ${id} for timestamp:`, error)
+        return null
+      }
+    })
+
+    const points = await Promise.all(pointPromises)
+
+    const lastUpdate = points
+      .filter((point): point is MapPoint => point !== null)
+      .reduce((max, point) => Math.max(max, point.lastUpdated || 0), 0)
+
     return new NextResponse(null, {
       status: 200,
       headers: {
         'Last-Update': lastUpdate.toString(),
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
       },
     })
   } catch (error) {

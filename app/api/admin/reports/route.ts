@@ -1,71 +1,32 @@
 import { NextResponse } from 'next/server'
+import { getReports } from '@/app/actions/admin'
 import { auth } from '@clerk/nextjs/server'
-import { kv } from '@vercel/kv'
-import { isAdmin } from 'lib/admin'
-
-interface MapPoint {
-  id: string
-  name: string
-  type: 'street' | 'park' | 'diy'
-  coordinates: [number, number]
-  createdBy: string
-}
-
-interface Report {
-  id: string
-  userId: string
-  reason: string
-  createdAt: number
-  status: 'pending' | 'reviewed' | 'resolved'
-  spotId: string
-  spotName: string
-}
+import { isAdmin } from '@/lib/admin'
 
 export async function GET() {
   try {
+    // Check if the user is authenticated
     const { userId } = await auth()
-
-    // Only allow admin access
-    if (!userId || !(await isAdmin())) {
-      return new NextResponse('Unauthorized', { status: 401 })
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get all points and report keys in parallel
-    const [points, reportKeys] = await Promise.all([
-      kv.mget<MapPoint[]>(await kv.keys('point:*')),
-      kv.keys('reports:*'),
-    ])
+    // Check if the user is an admin
+    const adminStatus = await isAdmin()
+    if (!adminStatus) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
-    // Create a map of point IDs to point data for quick lookup
-    const pointsMap = new Map(points.map((point) => [point.id, point]))
+    // Get reports
+    const { reports, error } = await getReports()
 
-    // Get all reports in parallel
-    const reports = await Promise.all(
-      reportKeys.map(async (key) => {
-        const pointId = key.replace('reports:', '')
-        const reports = (await kv.get<Report[]>(key)) || []
+    if (error) {
+      return NextResponse.json({ error }, { status: 500 })
+    }
 
-        // Get point data if it exists, otherwise use a default name
-        const point = pointsMap.get(pointId)
-        const spotName = point?.name || 'Unknown Spot'
-
-        return reports.map((report) => ({
-          ...report,
-          spotId: pointId,
-          spotName,
-        }))
-      }),
-    )
-
-    // Flatten and filter out null values
-    const allReports = reports.flat().filter((r): r is Report => r !== null)
-
-    // Sort by creation date, newest first
-    allReports.sort((a, b) => b.createdAt - a.createdAt)
-
-    return NextResponse.json(allReports)
+    return NextResponse.json(reports)
   } catch (error) {
-    console.error('Error fetching reports:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    console.error('Error in admin reports API:', error)
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
   }
 }

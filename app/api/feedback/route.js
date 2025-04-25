@@ -2,7 +2,13 @@ import { Resend } from 'resend'
 import { kv } from '@vercel/kv'
 import { z } from 'zod'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+// Check if we have the required environment variables
+const RESEND_API_KEY = process.env.RESEND_API_KEY
+const RESEND_EMAIL_FROM = process.env.RESEND_EMAIL_FROM
+const RESEND_EMAIL_TO = process.env.RESEND_EMAIL_TO
+
+// Initialize Resend only if we have an API key
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null
 
 // Update rate limit configuration
 const RATE_LIMITS = [
@@ -25,13 +31,35 @@ const RATE_LIMITS = [
 // Add validation schema matching client-side
 const feedbackSchema = z.object({
   feedback: z.string().min(1).max(2000),
+  email: z.string().email().optional(), // Add optional email field
 })
 
 export async function POST(request) {
   try {
-    // Get user identifier (wallet address or IP)
+    // Check if required environment variables are set
+    if (!resend || !RESEND_EMAIL_FROM || !RESEND_EMAIL_TO) {
+      console.error('Missing required environment variables for feedback system')
+      return new Response(JSON.stringify({ error: 'Feedback system not properly configured' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Parse request body before using it
+    let body
+    try {
+      body = await request.json()
+    } catch (error) {
+      return new Response(JSON.stringify({ error: 'Invalid JSON payload' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Get user identifier (wallet address, email or IP)
     const identifier =
       request.headers.get('x-wallet-address') ||
+      body.email ||
       request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
       'anonymous'
 
@@ -65,7 +93,6 @@ export async function POST(request) {
     }
 
     // Validate request body
-    const body = await request.json()
     const validation = feedbackSchema.safeParse(body)
 
     if (!validation.success) {
@@ -82,27 +109,46 @@ export async function POST(request) {
     }
 
     // Use validated data
-    const { feedback } = validation.data
+    const { feedback, email } = validation.data
 
-    const { data, error } = await resend.emails.send({
-      from: process.env.RESEND_EMAIL_FROM,
-      to: process.env.RESEND_EMAIL_TO,
-      subject: 'New Feedback!',
-      text: feedback,
-    })
+    // Add user identifier info to the email
+    const emailText = `
+Feedback from: ${identifier}
+${email ? `Email: ${email}` : ''}
 
-    if (error) {
-      console.error('Resend error:', error)
-      return new Response(JSON.stringify({ success: false, error }), {
+${feedback}
+    `
+
+    try {
+      const { data, error } = await resend.emails.send({
+        from: RESEND_EMAIL_FROM,
+        to: RESEND_EMAIL_TO,
+        subject: 'New Feedback!',
+        text: emailText,
+      })
+
+      if (error) {
+        console.error('Resend error:', error)
+        return new Response(
+          JSON.stringify({ success: false, error: 'Failed to send feedback email' }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        )
+      }
+
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    } catch (emailError) {
+      console.error('Email sending error:', emailError)
+      return new Response(JSON.stringify({ success: false, error: 'Email service error' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       })
     }
-
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    })
   } catch (error) {
     // Update error handling to include Zod errors
     if (error instanceof z.ZodError) {
@@ -121,7 +167,8 @@ export async function POST(request) {
     return new Response(
       JSON.stringify({
         success: false,
-        error: error.message,
+        error: 'Internal server error',
+        message: error.message,
       }),
       {
         status: 500,

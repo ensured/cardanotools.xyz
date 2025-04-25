@@ -1,23 +1,35 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { NextResponse } from 'next/server'
 import { kv } from '@vercel/kv'
+import { auth } from '@clerk/nextjs/server'
+import { isAdmin } from '@/lib/admin'
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
+    // Check if the user is authenticated
     const { userId } = await auth()
     if (!userId) {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get all report keys
-    const reportKeys = await kv.keys('reports:*')
+    // Check if the user is an admin
+    const adminStatus = await isAdmin()
+    if (!adminStatus) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
-    // Delete all report entries
-    await Promise.all(reportKeys.map((key) => kv.del(key)))
+    // Find and delete all reports in the new format
+    const reportKeys = await kv.keys('report:*')
+    if (reportKeys.length > 0) {
+      // Delete all reports with the report: prefix
+      await Promise.all(reportKeys.map((key) => kv.del(key)))
+    }
 
-    return new NextResponse(null, { status: 204 })
+    // Clear legacy reports too for backward compatibility
+    await kv.del('reports')
+
+    return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('[REPORTS_DENY_ALL]', error)
-    return new NextResponse('Internal Error', { status: 500 })
+    console.error('Error denying all reports:', error)
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
   }
 }

@@ -26,8 +26,6 @@ interface Meetup {
   createdAt: number
 }
 
-const CACHE_KEY = 'points:all'
-
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
@@ -46,7 +44,6 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
 
     // Get the point to check ownership
     const point = await kv.get<MapPoint>(`point:${params.id}`)
-
     if (!point) {
       return new NextResponse('Point not found', { status: 404 })
     }
@@ -59,23 +56,14 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     // Get all meetups for this spot
     const meetupIds = await kv.lrange(`spot:${params.id}:meetups`, 0, -1)
 
-    // Get current cached points
-    const cachedPoints = await kv.get<MapPoint[]>(CACHE_KEY)
-
     // Use pipeline for atomic operations
     const pipeline = kv.pipeline()
 
-    // Delete the point
+    // Remove from points list
+    pipeline.lrem('points:ids', 0, params.id)
+
+    // Delete the point data
     pipeline.del(`point:${params.id}`)
-
-    // Update the cache by removing the deleted point
-    if (cachedPoints) {
-      const updatedPoints = cachedPoints.filter((p) => p.id !== params.id)
-      pipeline.set(CACHE_KEY, updatedPoints)
-    }
-
-    // Update last update timestamp
-    pipeline.set('points:last_update', Date.now())
 
     // Delete all meetups and their references
     for (const meetupId of meetupIds) {

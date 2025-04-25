@@ -2,16 +2,8 @@
 
 import { toast } from 'sonner'
 import React from 'react'
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  useMapEvents,
-  useMap,
-  LayersControl,
-} from 'react-leaflet'
+import { useEffect, useState, useRef } from 'react'
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import '@/styles/map.css'
 import {
@@ -20,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -57,9 +50,16 @@ import {
   X,
   Users,
   Calendar,
+  RefreshCw,
+  Settings,
+  Upload,
+  FileEdit,
+  Trash,
+  MessageSquare,
+  AlertTriangle,
+  ChevronDown,
 } from 'lucide-react'
-import { useAdmin } from '@/lib/hooks/useAdmin'
-import { importSpots } from '@/app/actions/importSpots'
+import { importSpots } from '@/app/actions/import-spots'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Command,
@@ -74,6 +74,44 @@ import { MeetupsList } from './MeetupsList'
 import { createMeetup, getMeetups } from '@/app/actions/meetups'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import MarkerClusterGroup from 'react-leaflet-cluster'
+import {
+  getReports,
+  getProposals,
+  submitEditProposal,
+  updateProposalStatus,
+  deleteLegacyPoints,
+} from '@/app/actions/admin'
+import { v7 as uuidv7 } from 'uuid'
+import { isAdmin } from '@/lib/hooks/isAdmin'
+import 'leaflet.markercluster'
+import 'leaflet.markercluster/dist/MarkerCluster.css'
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import { Switch } from '@/components/ui/switch'
+import debounce from 'lodash/debounce'
+import { DeleteAllSpotsDialog } from '@/components/DeleteAllSpotsDialog'
+// Import LeafletMouseEvent type
+import type { LeafletMouseEvent } from 'leaflet'
+import { ImportSpotsButton } from '@/app/components/ImportSpotsButton'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 // Fix for default marker icons in Next.js
 const icon = L.icon({
@@ -91,7 +129,7 @@ const icon = L.icon({
 // Create a custom marker icon with session indicator
 const createMarkerIcon = (hasActiveSession: boolean) => {
   return L.divIcon({
-    className: 'custom-marker-icon',
+    className: `custom-marker-icon ${hasActiveSession ? 'active-session' : ''}`,
     html: `
       <div class="relative">
         <img src="/marker-icon.png" class="w-[25px] h-[41px]" />
@@ -120,6 +158,7 @@ interface MapPoint {
   coordinates: [number, number]
   createdBy: string
   address?: string
+  description?: string
   lastUpdated?: number // Add this field to track updates
 }
 
@@ -131,12 +170,14 @@ interface Comment {
   id: string
   content: string
   createdBy: string
+  createdByName: string
   createdAt: number
   updatedAt?: number
 }
 
 interface LikeStatus {
-  userId: string
+  email: string
+  name: string
   status: 'like' | 'dislike' | null
 }
 
@@ -155,7 +196,7 @@ interface AdminReport {
   createdAt: number
   status: 'pending' | 'reviewed' | 'resolved'
   spotId: string
-  spotName: string
+  spotName?: string
 }
 
 interface SearchResult {
@@ -180,6 +221,7 @@ interface EditProposal {
   userEmail: string
   proposedName: string
   proposedType: 'street' | 'park' | 'diy'
+  proposedDescription?: string
   reason: string
   createdAt: number
   status: 'pending' | 'approved' | 'rejected'
@@ -187,6 +229,7 @@ interface EditProposal {
   spotName: string
   currentName: string
   currentType: 'street' | 'park' | 'diy'
+  currentDescription?: string
 }
 
 interface NearbyMeetup {
@@ -246,6 +289,7 @@ function EditProposalDialog({
   onSubmit: (
     proposedName: string,
     proposedType: 'street' | 'park' | 'diy',
+    proposedDescription: string,
     editReason: string,
   ) => Promise<void>
   isSubmitting: boolean
@@ -254,6 +298,7 @@ function EditProposalDialog({
   const [proposedType, setProposedType] = useState<'street' | 'park' | 'diy'>(
     spotToEdit?.type || 'street',
   )
+  const [proposedDescription, setProposedDescription] = useState(spotToEdit?.description || '')
   const [editReason, setEditReason] = useState('')
 
   // Reset form when spotToEdit changes
@@ -261,13 +306,14 @@ function EditProposalDialog({
     if (spotToEdit) {
       setProposedName(spotToEdit.name)
       setProposedType(spotToEdit.type)
+      setProposedDescription(spotToEdit.description || '')
       setEditReason('')
     }
   }, [spotToEdit])
 
   const handleSubmit = async () => {
     if (!proposedName || !proposedType || !editReason) return
-    await onSubmit(proposedName, proposedType, editReason)
+    await onSubmit(proposedName, proposedType, proposedDescription, editReason)
   }
 
   return (
@@ -303,6 +349,16 @@ function EditProposalDialog({
                 <SelectItem value="diy">DIY</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="proposedDescription">Proposed Description</Label>
+            <Textarea
+              id="proposedDescription"
+              value={proposedDescription}
+              onChange={(e) => setProposedDescription(e.target.value)}
+              placeholder="Enter a description of this spot (optional)"
+              className="min-h-[80px]"
+            />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="editReason">Reason for Edit</Label>
@@ -448,7 +504,7 @@ const SearchResults = React.memo(
 
 SearchResults.displayName = 'SearchResults'
 
-// Add this new component before the Map component
+// Update the PopupContent component to receive the state setters
 const PopupContent = React.memo(
   ({
     point,
@@ -464,11 +520,15 @@ const PopupContent = React.memo(
     isLoadingAddress,
     likes,
     isLoadingLikes,
+    isLoadingComments,
     hasActiveSession,
     user,
     isAdmin,
     proposals,
     reports,
+    commentCounts,
+    setSpotToDelete,
+    setIsDeleteConfirmOpen,
   }: {
     point: MapPoint
     onPopupOpen: (id: string) => void
@@ -483,11 +543,15 @@ const PopupContent = React.memo(
     isLoadingAddress: boolean
     likes: LikeStatus[]
     isLoadingLikes: boolean
+    isLoadingComments: boolean
     hasActiveSession: boolean
     user: any
     isAdmin: boolean
     proposals: EditProposal[]
     reports: Report[]
+    commentCounts: number
+    setSpotToDelete: (spot: MapPoint | null) => void
+    setIsDeleteConfirmOpen: (open: boolean) => void
   }) => {
     // Add function to generate Google Maps directions URL
     const getGoogleMapsDirectionsUrl = () => {
@@ -495,10 +559,18 @@ const PopupContent = React.memo(
       return `https://www.google.com/maps/dir/?api=1&destination=${coordinates[0]},${coordinates[1]}`
     }
 
+    // Is social data loading
+    const isSocialLoading = isLoadingLikes || isLoadingComments
+
     return (
       <div className="space-y-2">
         <h3 className="font-semibold">{point.name}</h3>
         <p className="text-sm text-gray-600">{point.type}</p>
+        {point.description && (
+          <p className="border-l-2 border-gray-300 pl-2 text-sm italic text-gray-700">
+            {point.description}
+          </p>
+        )}
         {isLoadingAddress ? (
           <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
             <Loader2 className="h-7 w-7 animate-spin" />
@@ -549,18 +621,74 @@ const PopupContent = React.memo(
           </Button>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-2 w-full"
-          onClick={(e) => {
-            e.stopPropagation()
-            onEdit(point)
-          }}
-        >
-          <Edit className="mr-1 h-4 w-4" />
-          Propose Edit
-        </Button>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Settings className="mr-1 h-4 w-4" />
+              Spot Actions
+              <ChevronDown className="ml-1 h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-48 p-0">
+            <div className="flex flex-col">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="flex w-full justify-start rounded-none"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onEdit(point)
+                }}
+              >
+                <Edit className="mr-2 h-4 w-4" />
+                Propose Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="flex w-full justify-start rounded-none"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onReport(point.id)
+                }}
+              >
+                <AlertTriangle className="mr-2 h-4 w-4" />
+                Report Spot
+              </Button>
+
+              {(point.createdBy === user!.primaryEmailAddress?.emailAddress || isAdmin) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex w-full justify-start rounded-none text-red-500 hover:bg-red-50 hover:text-red-600"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSpotToDelete(point)
+                    setIsDeleteConfirmOpen(true)
+                  }}
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash className="mr-2 h-4 w-4" />
+                      Delete Spot
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
 
         {proposals?.filter((p) => p.status === 'pending').length > 0 && (
           <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
@@ -581,86 +709,63 @@ const PopupContent = React.memo(
           </div>
         )}
 
-        <div className="mt-2 flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`flex items-center gap-1 ${likes?.find((l) => l.userId === user?.id)?.status === 'like' ? 'text-green-500' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onLike(
-                point.id,
-                likes?.find((l) => l.userId === user?.id)?.status === 'like' ? null : 'like',
-              )
-            }}
-            disabled={isLoadingLikes}
-          >
-            <ThumbsUp className="h-4 w-4" />
-            <span>{likes?.filter((l) => l.status === 'like').length || 0}</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`flex items-center gap-1 ${likes?.find((l) => l.userId === user?.id)?.status === 'dislike' ? 'text-red-500' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onLike(
-                point.id,
-                likes?.find((l) => l.userId === user?.id)?.status === 'dislike' ? null : 'dislike',
-              )
-            }}
-            disabled={isLoadingLikes}
-          >
-            <ThumbsDown className="h-4 w-4" />
-            <span>{likes?.filter((l) => l.status === 'dislike').length || 0}</span>
-          </Button>
-        </div>
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-2 w-full"
-          onClick={(e) => {
-            e.stopPropagation()
-            onComment()
-          }}
-        >
-          Show Comments
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          className="mt-2 w-full text-gray-500 hover:text-red-500"
-          onClick={(e) => {
-            e.stopPropagation()
-            onReport(point.id)
-          }}
-        >
-          <Flag className="mr-1 h-4 w-4" />
-          Report Spot
-        </Button>
-
-        {(point.createdBy === user!.primaryEmailAddress?.emailAddress || isAdmin) && (
-          <Button
-            variant="destructive"
-            size="sm"
-            className="mt-2 w-full"
-            onClick={(e) => {
-              e.stopPropagation()
-              onDelete(point.id)
-            }}
-            disabled={isDeleting}
-          >
-            {isDeleting ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Deleting...
-              </>
-            ) : (
-              'Delete Spot'
-            )}
-          </Button>
+        {isSocialLoading ? (
+          <div className="mt-2 flex justify-center py-2">
+            <div className="flex flex-col items-center gap-1">
+              <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2 flex flex-wrap items-center justify-evenly gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`flex items-center gap-1 ${likes?.find((l) => l.email === user?.primaryEmailAddress?.emailAddress)?.status === 'like' ? 'text-green-500' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onLike(
+                  point.id,
+                  likes?.find((l) => l.email === user?.primaryEmailAddress?.emailAddress)
+                    ?.status === 'like'
+                    ? null
+                    : 'like',
+                )
+              }}
+            >
+              <ThumbsUp className="h-4 w-4" />
+              <span>{likes?.filter((l) => l.status === 'like').length || 0}</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`flex items-center gap-1 ${likes?.find((l) => l.email === user?.primaryEmailAddress?.emailAddress)?.status === 'dislike' ? 'text-red-500' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onLike(
+                  point.id,
+                  likes?.find((l) => l.email === user?.primaryEmailAddress?.emailAddress)
+                    ?.status === 'dislike'
+                    ? null
+                    : 'dislike',
+                )
+              }}
+            >
+              <ThumbsDown className="h-4 w-4" />
+              <span>{likes?.filter((l) => l.status === 'dislike').length || 0}</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex items-center gap-1"
+              onClick={(e) => {
+                e.stopPropagation()
+                onComment()
+              }}
+            >
+              <MessageSquare className="h-4 w-4" />
+              Comments ({commentCounts})
+            </Button>
+          </div>
         )}
       </div>
     )
@@ -678,6 +783,7 @@ export default function Map() {
   )
   const [newPointName, setNewPointName] = useState('')
   const [newPointType, setNewPointType] = useState<'street' | 'park' | 'diy'>('street')
+  const [newPointDescription, setNewPointDescription] = useState('')
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
   const [zoom, setZoom] = useState(2)
   const [mapType, setMapType] = useState<'satellite' | 'street'>('satellite')
@@ -698,13 +804,11 @@ export default function Map() {
   const [spotToReport, setSpotToReport] = useState<string | null>(null)
   const [reports, setReports] = useState<Record<string, Report[]>>({})
   const [isLoadingReports, setIsLoadingReports] = useState<Record<string, boolean>>({})
-  const isAdmin = useAdmin()
   const [isImporting, setIsImporting] = useState(false)
   const [importResult, setImportResult] = useState<{
     success: boolean
-    imported?: number
-    errors?: number
-    error?: string
+    message: string
+    count?: number
   } | null>(null)
   const [isReportsDialogOpen, setIsReportsDialogOpen] = useState(false)
   const [adminReports, setAdminReports] = useState<AdminReport[]>([])
@@ -748,7 +852,7 @@ export default function Map() {
   const [isLoadingAddress, setIsLoadingAddress] = useState<Record<string, boolean>>({})
   const [lastFetchTime, setLastFetchTime] = useState<number>(0)
   const pointsCache = useRef<MapPoint[]>([])
-  const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes in milliseconds
+  const CACHE_DURATION = 60 * 60 * 1000 // 1 hour in milliseconds
   const [isCacheValid, setIsCacheValid] = useState(true)
   const [userState, setUserState] = useState<string | null>(null)
   const [userStateBounds, setUserStateBounds] = useState<{
@@ -758,6 +862,29 @@ export default function Map() {
     west: number
   } | null>(null)
   const mapMoveTimeoutRef = useRef<NodeJS.Timeout>()
+  // Add this near the top of the component with other state declarations
+  const [clusterKey, setClusterKey] = useState(0)
+  const [isAdminReportsDialogOpen, setIsAdminReportsDialogOpen] = useState(false)
+  const [isUserAdmin, setIsUserAdmin] = useState(false)
+  const STORAGE_KEY = 'map_points_cache'
+  const STORAGE_TIMESTAMP_KEY = 'map_points_cache_timestamp'
+  const [hasApiError, setHasApiError] = useState(false)
+
+  // Add cache for nearby sessions
+  const nearbySessionsCache = useRef<{
+    lat: number
+    lng: number
+    radius: number
+    timestamp: number
+    sessions: NearbyMeetup[]
+  } | null>(null)
+
+  // Define cache duration in milliseconds (5 minutes)
+  const SESSION_CACHE_DURATION = 5 * 60 * 1000
+
+  // Add state for the spot to delete confirmation
+  const [spotToDelete, setSpotToDelete] = useState<MapPoint | null>(null)
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false)
 
   // Add function to handle map move end
   const handleMapMoveEnd = async () => {
@@ -808,6 +935,16 @@ export default function Map() {
   // Remove debounced handler and use direct state update
   const handleNameChange = (value: string) => {
     setNewPointName(value)
+  }
+
+  // Add a similar handler for description field
+  const handleDescriptionChange = (value: string) => {
+    setNewPointDescription(value)
+  }
+
+  // Add a similar handler for report reason field
+  const handleReportReasonChange = (value: string) => {
+    setReportReason(value)
   }
 
   useEffect(() => {
@@ -934,7 +1071,7 @@ export default function Map() {
   // Update the search effect
   useEffect(() => {
     const searchLocation = async () => {
-      if (!searchQuery.trim() || searchQuery.trim().length < 2) {
+      if (!searchQuery.trim() || searchQuery.trim().length < 3) {
         setSearchResults([])
         return
       }
@@ -961,18 +1098,31 @@ export default function Map() {
           searchUrlParams.set('limit', '5') // Limit results for zip codes, usually only one expected
           searchUrlParams.set('addressdetails', '1')
         } else {
+          // Add "skatepark" to query if it's not already there to improve skatepark matches
+          const isSearchingForSkatepark =
+            /(skate|skating|skatepark|park|bowl)/i.test(query) &&
+            !/(school|restaurant|mall)/i.test(query)
+
           // Use general query for other searches
           searchUrlParams.set('format', 'json')
           searchUrlParams.set('q', query)
           searchUrlParams.set('limit', '20')
           searchUrlParams.set('addressdetails', '1')
           searchUrlParams.set('extratags', '1')
+
+          // Add specialized search for skateparks
+          if (isSearchingForSkatepark) {
+            // Try a second search specifically for skateparks
+            const skateparkParams = new URLSearchParams()
+            skateparkParams.set('format', 'json')
+            skateparkParams.set('q', `${query} skatepark`)
+            skateparkParams.set('limit', '10')
+            skateparkParams.set('addressdetails', '1')
+            skateparkParams.set('extratags', '1')
+          }
         }
 
         let searchUrl = `https://nominatim.openstreetmap.org/search?${searchUrlParams.toString()}`
-
-        // Remove temporary debug log
-        // console.log("Nominatim Search URL:", searchUrl);
 
         const response = await fetch(searchUrl, {
           headers: {
@@ -986,12 +1136,77 @@ export default function Map() {
 
         const data = await response.json()
 
-        // Let Nominatim handle the primary sorting by relevance
+        // Try a second search specifically for skateparks if we didn't get skatepark results
+        let combinedResults = [...data]
+
+        const hasSkatepark = data.some(
+          (result: SearchResult) =>
+            result.display_name.toLowerCase().includes('skate') ||
+            (result.type && result.type.toLowerCase().includes('leisure')),
+        )
+
+        if (!hasSkatepark && !isZipCode && data.length < 5) {
+          try {
+            const skateparkParams = new URLSearchParams()
+            skateparkParams.set('format', 'json')
+            skateparkParams.set('q', `${query} skatepark`)
+            skateparkParams.set('limit', '10')
+            skateparkParams.set('addressdetails', '1')
+
+            const skateparkResponse = await fetch(
+              `https://nominatim.openstreetmap.org/search?${skateparkParams.toString()}`,
+              {
+                headers: {
+                  'Accept-Language': 'en-US,en;q=0.9',
+                },
+              },
+            )
+
+            if (skateparkResponse.ok) {
+              const skateparkData = await skateparkResponse.json()
+              combinedResults = [...data, ...skateparkData]
+            }
+          } catch (error) {
+            console.error('Error fetching skatepark results:', error)
+          }
+        }
+
+        // Prioritize results:
+        // 1. Skateparks first
+        // 2. Then results with the query term in the name
+        // 3. Then by default Nominatim relevance
+        const prioritizedResults = combinedResults.sort((a: SearchResult, b: SearchResult) => {
+          const aIsSkatepark =
+            a.display_name.toLowerCase().includes('skate') ||
+            (a.type && a.type.toLowerCase().includes('leisure'))
+
+          const bIsSkatepark =
+            b.display_name.toLowerCase().includes('skate') ||
+            (b.type && b.type.toLowerCase().includes('leisure'))
+
+          if (aIsSkatepark && !bIsSkatepark) return -1
+          if (!aIsSkatepark && bIsSkatepark) return 1
+
+          // Next priority: exact name match
+          const queryLower = query.toLowerCase()
+          const aHasExactMatch = a.display_name.toLowerCase().includes(queryLower)
+          const bHasExactMatch = b.display_name.toLowerCase().includes(queryLower)
+
+          if (aHasExactMatch && !bHasExactMatch) return -1
+          if (!aHasExactMatch && bHasExactMatch) return 1
+
+          return 0 // Let Nominatim handle the rest of the sorting
+        })
+
         // Filter out duplicates based on display_name
-        const uniqueResults = data.filter(
+        const uniqueResults = prioritizedResults.filter(
           (result: SearchResult, index: number, self: SearchResult[]) =>
             index === self.findIndex((r: SearchResult) => r.display_name === result.display_name),
         )
+
+        if (uniqueResults.length === 0) {
+          toast.error('No locations found. Try a different search term.')
+        }
 
         searchCache.current[cacheKey] = uniqueResults
         setSearchResults(uniqueResults)
@@ -1008,8 +1223,8 @@ export default function Map() {
       clearTimeout(searchTimeoutRef.current)
     }
 
-    // Keep debounce reasonable
-    searchTimeoutRef.current = setTimeout(searchLocation, 300)
+    // Increase debounce time to give users more time to type
+    searchTimeoutRef.current = setTimeout(searchLocation, 800)
 
     return () => {
       if (searchTimeoutRef.current) {
@@ -1025,11 +1240,41 @@ export default function Map() {
   }
 
   // Add function to handle search result selection
-  const handleSearchResultSelect = (lat: number, lon: number) => {
+  const handleSearchResultSelect = (lat: number, lon: number, displayName: string) => {
     setUserLocation([lat, lon])
-    setZoom(13) // Zoom in to city level
-    setSearchQuery('') // Clear the search query
-    setSearchResults([]) // Clear results
+
+    // Zoom in closer for better spot placement precision
+    setZoom(18) // Zoom in to a closer level (street level)
+
+    // Check if this is likely a skatepark based on the name
+    const isLikelySkatepark = /skate|skating|park|bowl/i.test(displayName)
+
+    // Clear the search UI
+    setSearchQuery('')
+    setSearchResults([])
+
+    // If it's likely a skatepark, offer to add it as a spot
+    if (isLikelySkatepark) {
+      // Set a timeout to allow the map to zoom/pan first
+      setTimeout(() => {
+        // Extract a name for the skatepark
+        let spotName = 'Skate Spot'
+        const nameMatch = displayName.match(/^(.*?)(?:,|$)/)
+        if (nameMatch && nameMatch[1]) {
+          spotName = nameMatch[1].trim()
+        }
+
+        // Pre-fill the spot name and open the dialog
+        setSelectedLocation({ lat, lng: lon })
+        setNewPointName(spotName)
+        setNewPointType('park') // Default to park for skateparks
+        setIsDialogOpen(true)
+
+        toast.success(`Found "${spotName}". You can now add it as a skate spot!`)
+      }, 500)
+    } else {
+      toast.info('Location found! Click on the map to add a skate spot here.')
+    }
   }
 
   // Add this new function for address lookup
@@ -1058,56 +1303,154 @@ export default function Map() {
   // Add function to fetch points with caching
   const fetchPoints = async (forceRefresh = false) => {
     const now = Date.now()
-    const shouldUseCache = !forceRefresh && isCacheValid && now - lastFetchTime < CACHE_DURATION
-
-    if (shouldUseCache && pointsCache.current.length > 0) {
-      setPoints(pointsCache.current)
-      setIsLoadingPoints(false)
-      return
-    }
-
     setIsLoadingPoints(true)
-    try {
-      // First check if we need to refresh
-      const lastUpdateResponse = await fetch('/api/points', { method: 'HEAD' })
-      if (lastUpdateResponse.ok) {
-        const lastUpdate = parseInt(
-          lastUpdateResponse.headers.get('Last-Update') || Date.now().toString(),
-        )
-        const oldestPoint = Math.min(...pointsCache.current.map((p) => p.lastUpdated || 0))
 
-        // If our cache is still valid, use it
-        if (lastUpdate <= oldestPoint && pointsCache.current.length > 0) {
-          setPoints(pointsCache.current)
-          setIsLoadingPoints(false)
-          return
+    try {
+      // First check if we need to refresh by checking the API's Last-Update header
+      const lastUpdateResponse = await fetch('/api/points', {
+        method: 'HEAD',
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      })
+
+      let needsRefresh = true
+
+      // Only try to use cache if we're not forcing a refresh
+      if (!forceRefresh) {
+        try {
+          // Try to load from localStorage
+          const storedTimestamp = localStorage.getItem(STORAGE_TIMESTAMP_KEY)
+          const storedPoints = localStorage.getItem(STORAGE_KEY)
+
+          // If Last-Update header is available, use it to determine if cache is valid
+          if (lastUpdateResponse.ok && storedTimestamp && storedPoints) {
+            const localTimestamp = parseInt(storedTimestamp, 10)
+            const serverLastUpdate = parseInt(
+              lastUpdateResponse.headers.get('Last-Update') || '0',
+              10,
+            )
+
+            // If local cache is newer than server's last update, use it
+            if (serverLastUpdate <= localTimestamp) {
+              const parsedPoints = JSON.parse(storedPoints) as MapPoint[]
+              if (parsedPoints.length > 0) {
+                console.log('Using localStorage cache - server data has not changed')
+                setPoints(parsedPoints)
+                pointsCache.current = parsedPoints
+                setLastFetchTime(localTimestamp)
+                setIsLoadingPoints(false)
+                needsRefresh = false
+                return
+              }
+            }
+          }
+
+          // If server data check failed, fall back to time-based cache check
+          if (needsRefresh && storedTimestamp && storedPoints) {
+            const timestamp = parseInt(storedTimestamp, 10)
+            // Check if cache is still fresh (within CACHE_DURATION)
+            if (now - timestamp < CACHE_DURATION) {
+              const parsedPoints = JSON.parse(storedPoints) as MapPoint[]
+              if (parsedPoints.length > 0) {
+                console.log('Using localStorage time-based cache')
+                setPoints(parsedPoints)
+                pointsCache.current = parsedPoints
+                setLastFetchTime(timestamp)
+                setIsLoadingPoints(false)
+                needsRefresh = false
+                return
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error loading points from localStorage:', error)
+          // Continue to fetch from API if localStorage fails
         }
       }
 
-      // If we need to refresh, fetch new data
-      const response = await fetch('/api/points')
-      if (response.ok) {
-        const data = await response.json()
-        pointsCache.current = data
-        setPoints(data)
-        setLastFetchTime(now)
-        setIsCacheValid(true)
-      } else {
-        console.error('Failed to fetch points:', await response.text())
+      // If we still need to refresh at this point, fetch from API
+      if (needsRefresh) {
+        console.log('Fetching fresh data from API')
+
+        const response = await fetch('/api/points', {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+
+          // Make sure we have an array
+          if (Array.isArray(data)) {
+            console.log(`Loaded ${data.length} points from API`)
+
+            if (data.length === 0) {
+              toast.info('No skate spots found. Try importing spots first!')
+              setIsLoadingPoints(false)
+              return
+            }
+
+            // Update state and cache
+            pointsCache.current = data
+            setPoints(data)
+            setLastFetchTime(now)
+
+            // Store in localStorage for persistent caching
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+              localStorage.setItem(STORAGE_TIMESTAMP_KEY, now.toString())
+            } catch (error) {
+              console.error('Error saving points to localStorage:', error)
+            }
+          } else {
+            console.error('API returned non-array data:', data)
+            setHasApiError(true)
+            toast.error('Received invalid data from API. Please try again.')
+          }
+        } else {
+          const errorText = await response.text()
+          console.error('Failed to fetch points:', errorText)
+          setHasApiError(true)
+          toast.error('Could not load skate spots. Please try again later.')
+        }
       }
     } catch (error) {
       console.error('Error fetching points:', error)
+      setHasApiError(true)
+      toast.error('Failed to load skate spots. Please check your connection and try again.')
     } finally {
       setIsLoadingPoints(false)
     }
   }
 
-  // Update useEffect to use the new fetchPoints function
+  // Update useEffect to use the new fetchPoints function with cache expiration check
   useEffect(() => {
     if (isMounted) {
-      fetchPoints()
+      // If the cache is invalid, force a refresh, otherwise use cache if available
+      fetchPoints(!isCacheValid)
+
+      // Set up periodic cache check
+      const interval = setInterval(() => {
+        const now = Date.now()
+        const lastFetch = parseInt(localStorage.getItem(STORAGE_TIMESTAMP_KEY) || '0', 10)
+
+        // If cache is expired or manually invalidated, force refresh
+        if (now - lastFetch > CACHE_DURATION || !isCacheValid) {
+          fetchPoints(true)
+          // Reset cache validity after forced refresh
+          setIsCacheValid(true)
+        }
+      }, CACHE_DURATION / 2) // Check halfway through cache lifetime
+
+      return () => clearInterval(interval)
     }
-  }, [isMounted])
+  }, [isMounted, isCacheValid]) // Add isCacheValid as a dependency
 
   // Add function to handle point updates
   const handlePointUpdate = async (newPoint: MapPoint) => {
@@ -1153,49 +1496,119 @@ export default function Map() {
   }
 
   // Update handleAddPoint to use the new handlePointUpdate function
-  const handleAddPoint = async () => {
-    if (!selectedLocation || !newPointName || !user || isAddingPoint) return
-
-    const userEmail = user.primaryEmailAddress?.emailAddress
-    if (!userEmail) {
-      console.error('No email address found for user')
+  const handleAddPoint = async (e: LeafletMouseEvent | React.MouseEvent) => {
+    // For button click, we need to check if there's a selected location
+    if (!('latlng' in e) && !selectedLocation) {
+      toast.error('Please select a location on the map first')
       return
     }
 
+    // Set isAddingPoint to true at the beginning to show loading state
     setIsAddingPoint(true)
 
-    // Create the new point without address initially
-    const newPoint: MapPoint = {
-      id: Date.now().toString(),
-      name: newPointName,
-      type: newPointType,
-      coordinates: [selectedLocation.lat, selectedLocation.lng],
-      createdBy: userEmail,
+    try {
+      // Get coordinates - either from Leaflet event or use the selected location
+      let coordinates: [number, number]
+      if ('latlng' in e) {
+        // This is a LeafletMouseEvent
+        const latlng = e.latlng
+        coordinates = [latlng.lat, latlng.lng]
+      } else if (selectedLocation) {
+        // This is a button click, use the selectedLocation
+        coordinates = [selectedLocation.lat, selectedLocation.lng]
+      } else {
+        throw new Error('No location selected')
+      }
+
+      // Create a temporary spot ID to use until we get the real one from the API
+      const tempSpotId = Math.random().toString(36).substring(2, 15)
+
+      // Add the new point to our state so it appears immediately
+      const newPoint: MapPoint = {
+        id: tempSpotId,
+        name: newPointName || 'New Spot',
+        coordinates,
+        type: newPointType || 'street',
+        description: newPointDescription || undefined,
+        createdBy: user?.primaryEmailAddress?.emailAddress || '',
+        lastUpdated: Date.now(),
+      }
+
+      // Add the new point to the map
+      setPoints((prevPoints) => [...prevPoints, newPoint])
+
+      // Update points cache
+      pointsCache.current = [...pointsCache.current, newPoint]
+
+      // Force the cluster group to re-render
+      setClusterKey((prev) => prev + 1)
+
+      // Submit the new point to the API
+      const response = await fetch('/api/points', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: newPointName || 'New Spot',
+          coordinates,
+          type: newPointType || 'street',
+          description: newPointDescription || undefined,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to add point')
+      }
+
+      const responseData = await response.json()
+      const realSpotId = responseData.id
+
+      // Update our temporary point with the real ID
+      setPoints((prevPoints) =>
+        prevPoints.map((p) => (p.id === tempSpotId ? { ...p, id: realSpotId } : p)),
+      )
+
+      // Update pointsCache as well
+      pointsCache.current = pointsCache.current.map((p) =>
+        p.id === tempSpotId ? { ...p, id: realSpotId } : p,
+      )
+
+      // Show success message
+      toast.success('Your new map point has been added successfully.')
+
+      // Reset the spot name, type, and description
+      setNewPointName('')
+      setNewPointType('street')
+      setNewPointDescription('')
+
+      // No need to invalidate cache or force a refresh - we've already updated the local state
+      // This prevents unnecessary reloading of all spots after adding a new one
+    } catch (error) {
+      console.error('Error adding point:', error)
+      toast.error('Failed to add point. Please try again.')
+    } finally {
+      setIsLoadingPoints(false)
+      setIsAddingPoint(false)
+      // Close the dialog after successfully adding a point
+      setIsDialogOpen(false)
     }
-
-    // Start address lookup in the background
-    const addressPromise = lookupAddress(selectedLocation.lat, selectedLocation.lng)
-
-    // Update the point with the address once we have it
-    const address = await addressPromise
-    if (address) {
-      newPoint.address = address
-    }
-
-    await handlePointUpdate(newPoint)
-    setNewPointName('')
-    setSelectedLocation(null)
-    setIsDialogOpen(false)
-    setIsAddingPoint(false)
   }
 
+  // Update the handleDeletePoint function
   const handleDeletePoint = async (pointId: string) => {
     if (!user) return
 
     // Optimistic update
     setIsDeletingPoint((prev) => ({ ...prev, [pointId]: true }))
-    setPoints((prevPoints) => prevPoints.filter((p) => p.id !== pointId))
-    pointsCache.current = pointsCache.current.filter((p) => p.id !== pointId)
+    const deletedPoint = points.find((p) => p.id === pointId)
+    if (!deletedPoint) return
+
+    // Create a new array without the deleted point
+    const newPoints = points.filter((p) => p.id !== pointId)
+    setPoints(newPoints)
+    pointsCache.current = newPoints
+    setClusterKey((prev) => prev + 1) // Force cluster group to re-render
 
     try {
       const response = await fetch(`/api/points/${pointId}`, {
@@ -1204,27 +1617,20 @@ export default function Map() {
 
       if (!response.ok) {
         // Revert optimistic update on error
-        const deletedPoint = points.find((p) => p.id === pointId)
-        if (deletedPoint) {
-          setPoints((prevPoints) => [...prevPoints, deletedPoint])
-          pointsCache.current = [...pointsCache.current, deletedPoint]
-        }
+        setPoints((prevPoints) => [...prevPoints, deletedPoint])
+        pointsCache.current = [...pointsCache.current, deletedPoint]
+        setClusterKey((prev) => prev + 1) // Force cluster group to re-render
         toast.error('Failed to delete point. Please try again.')
       } else {
         // Invalidate cache on successful deletion
         setIsCacheValid(false)
         toast.success('Spot deleted successfully')
-
-        // Force a refresh of the points
-        fetchPoints(true)
       }
     } catch (error) {
       // Revert optimistic update on error
-      const deletedPoint = points.find((p) => p.id === pointId)
-      if (deletedPoint) {
-        setPoints((prevPoints) => [...prevPoints, deletedPoint])
-        pointsCache.current = [...pointsCache.current, deletedPoint]
-      }
+      setPoints((prevPoints) => [...prevPoints, deletedPoint])
+      pointsCache.current = [...pointsCache.current, deletedPoint]
+      setClusterKey((prev) => prev + 1) // Force cluster group to re-render
       console.error('Error deleting point:', error)
       toast.error('An error occurred. Please try again.')
     } finally {
@@ -1251,14 +1657,19 @@ export default function Map() {
   const handleAddComment = async (spotId: string) => {
     if (!newComment.trim() || !user) return
 
+    // Optimistic update with a temporary ID
+    const tempId = 'temp-' + Date.now().toString()
     const newCommentObj: Comment = {
-      id: Date.now().toString(),
+      id: tempId,
       content: newComment.trim(),
       createdBy: user.primaryEmailAddress?.emailAddress || '',
+      createdByName:
+        user.firstName && user.lastName
+          ? `${user.firstName} ${user.lastName}`
+          : user.firstName || user.username || 'Anonymous',
       createdAt: Date.now(),
     }
 
-    // Optimistic update
     setIsAddingComment(true)
     setComments((prev) => ({
       ...prev,
@@ -1279,11 +1690,18 @@ export default function Map() {
         body: JSON.stringify({ content: newComment }),
       })
 
-      if (!response.ok) {
+      if (response.ok) {
+        const savedComment = await response.json()
+        // Update the comment with the real ID from the backend
+        setComments((prev) => ({
+          ...prev,
+          [spotId]: prev[spotId].map((c) => (c.id === tempId ? savedComment : c)),
+        }))
+      } else {
         // Revert optimistic update on error
         setComments((prev) => ({
           ...prev,
-          [spotId]: prev[spotId].filter((c) => c.id !== newCommentObj.id),
+          [spotId]: prev[spotId].filter((c) => c.id !== tempId),
         }))
         setCommentCounts((prev) => ({
           ...prev,
@@ -1295,7 +1713,7 @@ export default function Map() {
       // Revert optimistic update on error
       setComments((prev) => ({
         ...prev,
-        [spotId]: prev[spotId].filter((c) => c.id !== newCommentObj.id),
+        [spotId]: prev[spotId].filter((c) => c.id !== tempId),
       }))
       setCommentCounts((prev) => ({
         ...prev,
@@ -1314,10 +1732,17 @@ export default function Map() {
       return
     }
 
+    // Store the comment being deleted for potential rollback
+    const commentToDelete = comments[spotId]?.find((c) => c.id === commentId)
+    if (!commentToDelete) {
+      toast.error('Comment not found')
+      return
+    }
+
     // Optimistic update
     setComments((prev) => ({
       ...prev,
-      [spotId]: prev[spotId].filter((c) => c.id !== commentId),
+      [spotId]: prev[spotId]?.filter((c) => c.id !== commentId) || [],
     }))
     setCommentCounts((prev) => ({
       ...prev,
@@ -1335,33 +1760,29 @@ export default function Map() {
 
       if (!response.ok) {
         // Revert optimistic update on error
-        const deletedComment = comments[spotId]?.find((c) => c.id === commentId)
-        if (deletedComment) {
-          setComments((prev) => ({
-            ...prev,
-            [spotId]: [...(prev[spotId] || []), deletedComment],
-          }))
-          setCommentCounts((prev) => ({
-            ...prev,
-            [spotId]: (prev[spotId] || 0) + 1,
-          }))
-        }
-        const errorText = await response.text()
-        toast.error(errorText || 'Failed to delete comment. Please try again.')
-      }
-    } catch (error) {
-      // Revert optimistic update on error
-      const deletedComment = comments[spotId]?.find((c) => c.id === commentId)
-      if (deletedComment) {
         setComments((prev) => ({
           ...prev,
-          [spotId]: [...(prev[spotId] || []), deletedComment],
+          [spotId]: [...(prev[spotId] || []), commentToDelete],
         }))
         setCommentCounts((prev) => ({
           ...prev,
           [spotId]: (prev[spotId] || 0) + 1,
         }))
+        const errorText = await response.text()
+        toast.error(errorText || 'Failed to delete comment. Please try again.')
+      } else {
+        toast.success('Comment deleted successfully')
       }
+    } catch (error) {
+      // Revert optimistic update on error
+      setComments((prev) => ({
+        ...prev,
+        [spotId]: [...(prev[spotId] || []), commentToDelete],
+      }))
+      setCommentCounts((prev) => ({
+        ...prev,
+        [spotId]: (prev[spotId] || 0) + 1,
+      }))
       console.error('Error deleting comment:', error)
       toast.error('An error occurred. Please try again.')
     }
@@ -1371,7 +1792,15 @@ export default function Map() {
     setIsLoadingLikes((prev) => ({ ...prev, [spotId]: true }))
     try {
       const response = await fetch(`/api/points/${spotId}/likes`)
-      if (response.ok) {
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.warn(`Point ${spotId} not found when fetching likes. It may be newly created.`)
+          // Set empty likes array for newly created points
+          setLikes((prev) => ({ ...prev, [spotId]: [] }))
+        } else {
+          throw new Error('Failed to fetch likes')
+        }
+      } else {
         const data = await response.json()
         setLikes((prev) => ({ ...prev, [spotId]: data }))
       }
@@ -1385,13 +1814,30 @@ export default function Map() {
   const handleLike = async (spotId: string, status: 'like' | 'dislike' | null) => {
     if (!user) return
 
+    // Get the current user's email
+    const userEmail = user.primaryEmailAddress?.emailAddress
+    if (!userEmail) {
+      toast.error('Please wait while we verify your account...')
+      return
+    }
+
+    // Verify the spot exists
+    const spot = points.find((p) => p.id === spotId)
+    if (!spot) {
+      toast.error('Spot not found')
+      return
+    }
+
     // Optimistic update
     const currentLikes = likes[spotId] || []
-    const userLikeIndex = currentLikes.findIndex((like) => like.userId === user.id)
+    const userLikeIndex = currentLikes.findIndex((like) => like.email === userEmail)
 
     let newLikes: LikeStatus[]
     if (userLikeIndex === -1) {
-      newLikes = [...currentLikes, { userId: user.id, status }]
+      newLikes = [
+        ...currentLikes,
+        { email: userEmail, name: user.firstName || 'Anonymous', status },
+      ]
     } else {
       newLikes = [...currentLikes]
       if (status === null) {
@@ -1401,6 +1847,7 @@ export default function Map() {
       }
     }
 
+    // Update UI optimistically
     setLikes((prev) => ({ ...prev, [spotId]: newLikes }))
 
     try {
@@ -1409,13 +1856,21 @@ export default function Map() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+        }),
       })
 
       if (!response.ok) {
         // Revert optimistic update on error
         setLikes((prev) => ({ ...prev, [spotId]: currentLikes }))
-        toast.error('Failed to update like status. Please try again.')
+        const errorText = await response.text()
+        toast.error(errorText || 'Failed to update like status. Please try again.')
+      } else {
+        // Success! No need to re-fetch, we already updated the UI optimistically
+        const statusText =
+          status === 'like' ? 'liked' : status === 'dislike' ? 'disliked' : 'removed like from'
+        toast.success(`You ${statusText} this spot!`, { id: `like-${spotId}` })
       }
     } catch (error) {
       // Revert optimistic update on error
@@ -1498,12 +1953,26 @@ export default function Map() {
   const handlePopupOpen = async (pointId: string) => {
     setSelectedSpotId(pointId)
     fetchComments(pointId)
-    fetchLikes(pointId)
+
+    // Check if this is a newly created point
+    const point = points.find((p) => p.id === pointId)
+    const isNewPoint = point && Date.now() - (point.lastUpdated || 0) < 5000 // If created less than 5 seconds ago
+
+    if (isNewPoint) {
+      // For new points, delay fetching likes to allow time for the point to be stored
+      setIsLoadingLikes((prev) => ({ ...prev, [pointId]: true }))
+      setTimeout(() => {
+        fetchLikes(pointId)
+      }, 2000) // 2 second delay
+    } else {
+      // For existing points, fetch likes immediately
+      fetchLikes(pointId)
+    }
+
     fetchReports(pointId)
     fetchProposals(pointId)
 
     // Find the point in our points array
-    const point = points.find((p) => p.id === pointId)
     if (point && !point.address) {
       setIsLoadingAddress((prev) => ({ ...prev, [pointId]: true }))
       try {
@@ -1535,36 +2004,67 @@ export default function Map() {
   }
 
   const handleImport = async () => {
+    if (!user) return
     setIsImporting(true)
+    setImportResult(null) // Reset previous result
+
     try {
+      toast.info('Importing skate spots... This may take a moment.')
       const result = await importSpots()
-      setImportResult(result)
+
       if (result.success) {
-        // Refresh points after successful import
-        const response = await fetch('/api/points')
-        if (response.ok) {
-          const data = await response.json()
-          setPoints(data)
-        }
+        const count = result.count || 0
+        setImportResult({
+          success: true,
+          message: result.message || `Successfully imported spots (${count} added)`,
+          count,
+        })
+
+        toast.success(result.message || 'Successfully imported spots')
+
+        // Force refresh points to show the new data
+        await fetchPoints(true)
+
+        // Refresh the cluster after import to show new markers
+        setClusterKey((prev) => prev + 1)
+      } else {
+        setImportResult({
+          success: false,
+          message: result.error || 'Failed to import spots',
+        })
+
+        toast.error(result.error || 'Failed to import spots')
       }
     } catch (error) {
       console.error('Error importing spots:', error)
-      setImportResult({ success: false, error: 'Failed to import spots' })
+      setImportResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to import spots',
+      })
+
+      toast.error('Error importing spots. Please try again.')
     } finally {
       setIsImporting(false)
     }
   }
 
   const fetchAdminReports = async () => {
+    if (!isUserAdmin || isLoadingAdminReports) return // Prevent API calls if not admin
+
     setIsLoadingAdminReports(true)
     try {
       const response = await fetch('/api/admin/reports')
-      if (response.ok) {
-        const data = await response.json()
-        setAdminReports(data)
+      if (!response.ok) {
+        throw new Error(response.status === 403 ? 'Unauthorized' : 'Failed to fetch admin reports')
       }
+      const reports = await response.json()
+      setAdminReports(reports)
     } catch (error) {
       console.error('Error fetching admin reports:', error)
+      // Only show error if it's not an unauthorized error
+      if (!(error instanceof Error && error.message === 'Unauthorized')) {
+        toast.error('Failed to fetch reports')
+      }
     } finally {
       setIsLoadingAdminReports(false)
     }
@@ -1573,6 +2073,15 @@ export default function Map() {
   const handleUpdateReportStatus = async (reportId: string, newStatus: 'accept' | 'deny') => {
     setIsUpdatingReport((prev) => ({ ...prev, [reportId]: true }))
     try {
+      // Get the report details before making the API call
+      // This way if the API call fails but we already have the report data locally, we can still use it
+      const report = adminReports.find((r) => r.id === reportId)
+      if (!report) {
+        toast.error('Report not found in local state')
+        console.error(`Report ${reportId} not found in local state before API call`)
+        return
+      }
+
       const response = await fetch(`/api/admin/reports/${reportId}`, {
         method: 'PATCH',
         headers: {
@@ -1583,17 +2092,60 @@ export default function Map() {
 
       if (!response.ok) {
         const errorText = await response.text()
+
+        // Special handling for "Report not found" errors
+        if (errorText.includes('Report not found')) {
+          console.error(
+            `API returned "Report not found" for ID ${reportId}. This could mean the report was already processed.`,
+          )
+
+          // Remove the report from the UI anyway since it doesn't exist on the backend
+          setAdminReports((prev) => prev.filter((r) => r.id !== reportId))
+
+          if (newStatus === 'accept') {
+            // If accepting, we'll still try to remove the spot from the local state
+            setPoints((prev) => prev.filter((p) => p.id !== report.spotId))
+
+            // Update pointsCache.current and localStorage
+            pointsCache.current = pointsCache.current.filter((p) => p.id !== report.spotId)
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(pointsCache.current))
+              localStorage.setItem(STORAGE_TIMESTAMP_KEY, Date.now().toString())
+            } catch (error) {
+              console.error('Error updating localStorage after spot removal:', error)
+            }
+
+            toast.success('Report processed and spot removed from view')
+          } else {
+            toast.success('Report removed from queue')
+          }
+
+          // Refresh admin reports to ensure our UI is in sync with the backend
+          // This will update the UI properly if the report still exists somewhere
+          await fetchAdminReports()
+
+          return
+        }
+
         throw new Error(errorText || 'Failed to update report status')
       }
 
-      // Get the report details before removing it
-      const report = adminReports.find((r) => r.id === reportId)
-      if (!report) throw new Error('Report not found')
+      // If we got here, the API call was successful
 
       // If accepted, remove the spot
       if (newStatus === 'accept') {
         // Remove the spot from the points list
         setPoints((prev) => prev.filter((p) => p.id !== report.spotId))
+
+        // Update pointsCache.current and localStorage
+        pointsCache.current = pointsCache.current.filter((p) => p.id !== report.spotId)
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(pointsCache.current))
+          localStorage.setItem(STORAGE_TIMESTAMP_KEY, Date.now().toString())
+        } catch (error) {
+          console.error('Error updating localStorage after spot removal:', error)
+        }
+
         toast.success('Spot removed successfully')
       } else {
         // Update the local reports state to remove the denied report
@@ -1614,35 +2166,24 @@ export default function Map() {
     }
   }
 
-  useEffect(() => {
-    // If user is admin, fetch admin data
-    const fetchAdminData = async () => {
-      if (isAdmin) {
-        try {
-          // Fetch admin reports
-          const reportsResponse = await fetch('/api/admin/reports')
-          if (reportsResponse.ok) {
-            const reportsData = await reportsResponse.json()
-            setAdminReports(reportsData)
-          }
-
-          // Fetch admin proposals
-          const proposalsResponse = await fetch('/api/admin/proposals')
-          if (proposalsResponse.ok) {
-            const proposalsData = await proposalsResponse.json()
-            setAdminProposals(proposalsData)
-          }
-        } catch (error) {
-          console.error('Error fetching admin data:', error)
-        }
-      }
-    }
-
-    fetchAdminData()
-  }, [isAdmin])
-
   const handleEditComment = async (spotId: string, commentId: string) => {
     if (!editingComment || !editingComment.content.trim()) return
+
+    // Store the original comment for potential rollback
+    const originalComment = comments[spotId]?.find((c) => c.id === commentId)
+    if (!originalComment) {
+      toast.error('Comment not found')
+      return
+    }
+
+    // Optimistic update
+    setComments((prev) => ({
+      ...prev,
+      [spotId]:
+        prev[spotId]?.map((c) =>
+          c.id === commentId ? { ...c, content: editingComment.content, updatedAt: Date.now() } : c,
+        ) || [],
+    }))
 
     setIsEditingComment(true)
     try {
@@ -1661,14 +2202,25 @@ export default function Map() {
         const updatedComment = await response.json()
         setComments((prev) => ({
           ...prev,
-          [spotId]: prev[spotId].map((c) => (c.id === commentId ? updatedComment : c)),
+          [spotId]: prev[spotId]?.map((c) => (c.id === commentId ? updatedComment : c)) || [],
         }))
         setEditingComment(null)
         toast.success('Comment updated successfully')
       } else {
-        toast.error('Failed to update comment')
+        // Revert optimistic update on error
+        setComments((prev) => ({
+          ...prev,
+          [spotId]: prev[spotId]?.map((c) => (c.id === commentId ? originalComment : c)) || [],
+        }))
+        const errorText = await response.text()
+        toast.error(errorText || 'Failed to update comment')
       }
     } catch (error) {
+      // Revert optimistic update on error
+      setComments((prev) => ({
+        ...prev,
+        [spotId]: prev[spotId]?.map((c) => (c.id === commentId ? originalComment : c)) || [],
+      }))
       console.error('Error updating comment:', error)
       toast.error('An error occurred while updating the comment')
     } finally {
@@ -1691,8 +2243,9 @@ export default function Map() {
   }
 
   const handleDenyAllReports = async () => {
+    if (!isAdmin) return
+    setIsDenyingAll(true)
     try {
-      setIsDenyingAll(true)
       const response = await fetch('/api/admin/reports/deny-all', {
         method: 'POST',
         headers: {
@@ -1716,36 +2269,87 @@ export default function Map() {
     }
   }
 
-  // Add function to fetch nearby sessions
+  // Add function to fetch nearby sessions with caching
   const fetchNearbySessions = async () => {
     if (!mapRef.current) return
 
-    // Don't fetch if zoomed out too far (zoom level less than 8)
-    if (mapRef.current.getZoom() < 8) {
-      setNearbySessions([])
-      return
+    const center = mapRef.current.getCenter()
+    const radius = Math.max(50, Math.min(150, 30 * Math.pow(2, 16 - mapRef.current.getZoom())))
+    const now = Date.now()
+
+    // Check if we have a valid cached result
+    if (nearbySessionsCache.current) {
+      const cache = nearbySessionsCache.current
+      const distanceFromCache = calculateDistance(center.lat, center.lng, cache.lat, cache.lng)
+
+      // Use cache if it's fresh (< 5 min old), we're within 10km of the cached position,
+      // and the radius is similar (± 20%)
+      const isFresh = now - cache.timestamp < SESSION_CACHE_DURATION
+      const isNearby = distanceFromCache < 10 // 10km
+      const isRadiusSimilar = Math.abs(cache.radius - radius) / cache.radius < 0.2
+
+      if (isFresh && isNearby && isRadiusSimilar) {
+        console.log(
+          `Using cached sessions: fresh(${isFresh}), nearby(${distanceFromCache.toFixed(2)}km), radius(${isRadiusSimilar})`,
+        )
+        setNearbySessions(cache.sessions)
+        return
+      }
     }
 
     setIsLoadingNearbySessions(true)
+
     try {
-      const center = mapRef.current.getCenter()
+      console.log(`Fetching sessions with radius: ${radius}km at zoom: ${mapRef.current.getZoom()}`)
+
       const response = await fetch(
-        `/api/meetups/nearby?lat=${center.lat}&lng=${center.lng}&radius=50`,
+        `/api/meetups/nearby?lat=${center.lat}&lng=${center.lng}&radius=${radius}`,
       )
+
       if (response.ok) {
         const data = await response.json()
+        console.log(`Found ${data.length} nearby sessions`)
+
+        // Update cache
+        nearbySessionsCache.current = {
+          lat: center.lat,
+          lng: center.lng,
+          radius,
+          timestamp: now,
+          sessions: data,
+        }
+
         setNearbySessions(data)
+
+        // Force update cluster markers to refresh the purple dots
+        setClusterKey((prevKey) => prevKey + 1)
       }
     } catch (error) {
       console.error('Error fetching nearby sessions:', error)
+      toast.error('Failed to fetch nearby sessions')
     } finally {
       setIsLoadingNearbySessions(false)
     }
   }
 
-  // Add effect to fetch nearby sessions when toggle is changed
+  // Helper function to calculate distance between coordinates in km
+  const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371 // Earth's radius in km
+    const dLat = (lat2 - lat1) * (Math.PI / 180)
+    const dLng = (lng2 - lng1) * (Math.PI / 180)
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * (Math.PI / 180)) *
+        Math.cos(lat2 * (Math.PI / 180)) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return R * c
+  }
+
+  // Update effect to fetch nearby sessions when toggle is changed
   useEffect(() => {
-    if (showNearbySessions) {
+    if (showNearbySessions && mapRef.current) {
       fetchNearbySessions()
     } else {
       setNearbySessions([])
@@ -1758,6 +2362,17 @@ export default function Map() {
     return hasActiveSession ? '#9333ea' : '#ef4444' // Purple for active sessions, red for others
   }
 
+  useEffect(() => {
+    // Only run this effect when isUserAdmin changes to true
+    if (isUserAdmin) {
+      // Fetch admin reports
+      fetchAdminReports()
+
+      // Fetch admin proposals
+      fetchAdminProposals()
+    }
+  }, [isUserAdmin])
+
   const handleUpdateProposal = async (
     spotId: string,
     proposalId: string,
@@ -1766,61 +2381,65 @@ export default function Map() {
   ) => {
     setIsUpdatingProposal((prev) => ({ ...prev, [proposalId]: true }))
     try {
-      const response = await fetch(`/api/points/${spotId}/proposals`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          proposalId,
-          status,
-          adminNotes,
-        }),
-      })
+      await updateProposalStatus(spotId, proposalId, status, adminNotes)
 
-      if (response.ok) {
-        // Update UI immediately
-        setAdminProposals((prev) => prev.filter((p) => p.id !== proposalId))
+      // Update UI immediately
+      setAdminProposals((prev) => prev.filter((p) => p.id !== proposalId))
 
-        // Refresh points if proposal was approved
-        if (status === 'approved') {
-          const pointsResponse = await fetch('/api/points')
-          if (pointsResponse.ok) {
-            const data = await pointsResponse.json()
+      // If approved, update the points including cache and localStorage
+      if (status === 'approved') {
+        // Instead of calling fetchPoints, do the direct cache update for immediate feedback
+        const response = await fetch('/api/points', {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          if (Array.isArray(data)) {
+            // Update state and cache
+            pointsCache.current = data
             setPoints(data)
+            setLastFetchTime(Date.now())
+
+            // Update localStorage
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+              localStorage.setItem(STORAGE_TIMESTAMP_KEY, Date.now().toString())
+            } catch (error) {
+              console.error('Error saving points to localStorage:', error)
+            }
           }
         }
+
+        toast.success('Proposal approved and changes applied')
       } else {
-        toast.error('Failed to update proposal. Please try again.')
+        toast.success('Proposal rejected')
       }
     } catch (error) {
       console.error('Error updating proposal:', error)
-      toast.error('An error occurred. Please try again.')
+      toast.error('Failed to update proposal. Please try again.')
     } finally {
       setIsUpdatingProposal((prev) => ({ ...prev, [proposalId]: false }))
     }
   }
 
   const fetchAdminProposals = async () => {
-    if (isLoadingAdminProposals) return // Prevent multiple simultaneous fetches
+    if (!isUserAdmin || isLoadingAdminProposals) return // Prevent API calls if not admin
 
     setIsLoadingAdminProposals(true)
     try {
-      const response = await fetch('/api/admin/proposals', {
-        headers: {
-          'Cache-Control': 'no-cache',
-        },
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch proposals: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      setAdminProposals(data)
+      const proposals = await getProposals()
+      setAdminProposals(proposals)
     } catch (error) {
       console.error('Error fetching admin proposals:', error)
-      // Optionally show an error message to the user
+      // Only show error if it's not an unauthorized error
+      if (!(error instanceof Error && error.message === 'Unauthorized')) {
+        toast.error('Failed to fetch proposals')
+      }
     } finally {
       setIsLoadingAdminProposals(false)
     }
@@ -1926,36 +2545,54 @@ export default function Map() {
 
   // Update the renderPopupContent function to use the memoized component
   const renderPopupContent = (point: MapPoint) => {
+    const hasActiveSession = nearbySessions.some((session) => session.spotId === point.id)
+    const userLike = likes[point.id]?.find(
+      (like) => like.email === user?.primaryEmailAddress?.emailAddress,
+    )
+    const totalLikes = likes[point.id]?.filter((like) => like.status === 'like').length || 0
+    const totalDislikes = likes[point.id]?.filter((like) => like.status === 'dislike').length || 0
+
     return (
       <PopupContent
         point={point}
         onPopupOpen={handlePopupOpen}
         onDelete={handleDeletePoint}
-        onReport={(id) => {
-          setSpotToReport(id)
+        onReport={() => {
+          setSpotToReport(point.id)
           setIsReportDialogOpen(true)
         }}
-        onEdit={(point) => {
+        onEdit={() => {
           setSpotToEdit(point)
           setIsEditProposalDialogOpen(true)
         }}
-        onLike={handleLike}
-        onComment={() => setIsCommentsDialogOpen(true)}
-        onMeetup={() => {
-          setSelectedSpotForMeetup({ id: point.id, name: point.name })
-          setIsMeetupsListDialogOpen(true)
-          getMeetups(point.id).then(setMeetups)
+        onLike={(id, status) => handleLike(id, status)}
+        onComment={() => {
+          setSelectedSpotId(point.id)
+          setIsCommentsDialogOpen(true)
         }}
-        isDeleting={isDeletingPoint[point.id]}
-        isReporting={isReporting[point.id]}
-        isLoadingAddress={isLoadingAddress[point.id]}
-        likes={likes[point.id]}
-        isLoadingLikes={isLoadingLikes[point.id]}
-        hasActiveSession={nearbySessions.some((session) => session.spotId === point.id)}
+        onMeetup={() => {
+          setSelectedSpotForMeetup({
+            id: point.id,
+            name: point.name,
+          })
+          // Load existing meetups for this spot
+          getMeetups(point.id).then(setMeetups).catch(console.error)
+          setIsMeetupsListDialogOpen(true)
+        }}
+        isDeleting={!!isDeletingPoint[point.id]}
+        isReporting={!!isReporting[point.id]}
+        isLoadingAddress={!!isLoadingAddress[point.id]}
+        likes={likes[point.id] || []}
+        isLoadingLikes={!!isLoadingLikes[point.id]}
+        isLoadingComments={!!isLoadingComments[point.id]}
+        hasActiveSession={hasActiveSession}
         user={user}
-        isAdmin={isAdmin}
-        proposals={proposals[point.id]}
-        reports={reports[point.id]}
+        isAdmin={isUserAdmin}
+        proposals={proposals[point.id] || []}
+        reports={reports[point.id] || []}
+        commentCounts={commentCounts[point.id] || 0}
+        setSpotToDelete={setSpotToDelete}
+        setIsDeleteConfirmOpen={setIsDeleteConfirmOpen}
       />
     )
   }
@@ -2013,11 +2650,14 @@ export default function Map() {
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
-        const { lastUpdate } = await response.json()
+        // Removed: const { lastUpdate } = await response.json()
 
+        // Use current timestamp for comparison instead
+        const currentTimestamp = Date.now()
         const oldestPoint = Math.min(...pointsCache.current.map((p) => p.lastUpdated || 0))
 
-        if (lastUpdate > oldestPoint) {
+        // Check if cache is older than CACHE_DURATION
+        if (currentTimestamp - oldestPoint > CACHE_DURATION) {
           setIsCacheValid(false)
           fetchPoints(true)
         }
@@ -2029,6 +2669,95 @@ export default function Map() {
     const interval = setInterval(checkForUpdates, CACHE_DURATION)
     return () => clearInterval(interval)
   }, [isMounted])
+
+  // Add effect to check admin status
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (user) {
+        const adminStatus = await isAdmin()
+        setIsUserAdmin(adminStatus)
+      }
+    }
+    checkAdminStatus()
+  }, [user])
+
+  // Create a CSS class with transition for markers
+  const markerAnimationClass = 'transition-all duration-300 ease-in-out transform hover:scale-110'
+
+  // Add effect to update marker clusters when nearbySessions or points change
+  useEffect(() => {
+    // Force update cluster markers to refresh the purple dots
+    if (mapRef.current) {
+      setClusterKey((prevKey) => prevKey + 1)
+    }
+  }, [nearbySessions, points.length])
+
+  // Add effect to fetch nearby sessions when map moves or zoom changes
+  useEffect(() => {
+    if (!mapRef.current || !showNearbySessions) return
+
+    // Track last fetch position and zoom
+    let lastLat = 0
+    let lastLng = 0
+    let lastZoom = 0
+
+    const handleMapChange = debounce(() => {
+      if (!mapRef.current) return
+
+      const center = mapRef.current.getCenter()
+      const zoom = mapRef.current.getZoom()
+
+      // Only fetch if moved significantly (more than 0.01 degrees or ~1km) or zoom changed
+      const latDiff = Math.abs(center.lat - lastLat)
+      const lngDiff = Math.abs(center.lng - lastLng)
+      const zoomChanged = zoom !== lastZoom
+
+      // Significant movement threshold
+      const moveThreshold = 0.01
+
+      if (zoomChanged || latDiff > moveThreshold || lngDiff > moveThreshold) {
+        console.log(
+          `Fetching sessions: movement(${latDiff.toFixed(4)},${lngDiff.toFixed(4)}) or zoom changed(${zoomChanged})`,
+        )
+        lastLat = center.lat
+        lastLng = center.lng
+        lastZoom = zoom
+        fetchNearbySessions()
+      }
+    }, 2000) // Increase debounce to 2 seconds
+
+    mapRef.current.on('moveend', handleMapChange)
+    mapRef.current.on('zoomend', handleMapChange)
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.off('moveend', handleMapChange)
+        mapRef.current.off('zoomend', handleMapChange)
+      }
+    }
+  }, [mapRef.current, showNearbySessions])
+
+  // Add a handler for the newComment field
+  const handleCommentChange = (value: string) => {
+    setNewComment(value)
+  }
+
+  // Add a handler for the editingComment field
+  const handleEditingCommentChange = (value: string) => {
+    setEditingComment((prev) => (prev ? { ...prev, content: value } : null))
+  }
+
+  // Create a new function to handle the confirmation and actual deletion
+  const handleConfirmDelete = async () => {
+    if (!spotToDelete) return
+
+    try {
+      await handleDeletePoint(spotToDelete.id)
+    } finally {
+      setSpotToDelete(null)
+      setIsDeleteConfirmOpen(false)
+    }
+  }
 
   if (!isLoaded || !isMounted) {
     return (
@@ -2045,95 +2774,162 @@ export default function Map() {
   return (
     <div className="flex h-screen flex-col">
       {/* Header Section */}
-      <div className="sticky top-0 z-[1000] border-b shadow-sm backdrop-blur-sm">
-        <div className="container mx-auto px-2 py-1.5 sm:px-4 sm:py-2">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-            <div className="flex items-center gap-2">
+      <header className="sticky top-0 z-[1000] border-b bg-background/80 py-2 shadow-sm backdrop-blur-sm">
+        <div className="container mx-auto">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-12">
+            {/* Logo and Brand */}
+            <div className="flex items-center sm:col-span-3">
               <h1 className="bg-gradient-to-r from-blue to-purple-400 bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
                 SkateSpot
               </h1>
+              {isUserAdmin && (
+                <div className="ml-2 flex items-center">
+                  <div className="bg-blue-50 rounded px-2 py-0.5 text-xs text-blue">Admin</div>
+                </div>
+              )}
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="relative max-w-[100vw]">
-                <Command className="rounded-lg border shadow-sm" shouldFilter={false}>
-                  <CommandInput
-                    placeholder="Search for skate spots..."
-                    value={searchQuery}
-                    onValueChange={setSearchQuery}
-                    className="h-10"
-                    disabled={isSearching}
-                  />
-                  {searchQuery && (
-                    <div className="search-results-container absolute left-0 right-0 top-full z-[9999] mt-0.5 max-h-[250px] overflow-auto rounded-md border bg-background shadow-lg">
-                      <CommandList className="max-h-[250px] overflow-auto">
-                        {isSearching ? (
-                          <div className="flex items-center justify-center py-4">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          </div>
-                        ) : searchResults.length === 0 ? (
-                          <div className="py-4 text-center text-sm text-muted-foreground">
-                            No location found.
-                          </div>
-                        ) : (
-                          <CommandGroup>
-                            {searchResults.map((result) => (
-                              <CommandItem
-                                key={`${result.lat}-${result.lon}`}
-                                value={result.display_name}
-                                onSelect={() => handleSearchResultSelect(result.lat, result.lon)}
-                                className="flex w-full cursor-pointer items-start gap-2 px-2 py-2 hover:bg-accent"
-                              >
-                                <Search className="mt-1 h-4 w-4 shrink-0" />
-                                <div className="flex-1">
-                                  <div className="font-medium">
-                                    {result.address?.city ||
-                                      result.address?.town ||
-                                      result.address?.village ||
-                                      result.address?.suburb ||
-                                      result.address?.neighbourhood ||
-                                      'Location'}
+
+            {/* Search and Controls */}
+            <div className="flex items-center justify-between sm:col-span-9">
+              <div className="flex flex-1 items-center gap-2">
+                {/* Refresh Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    toast.success('Refreshing skate spots...')
+                    fetchPoints(true)
+                  }}
+                  disabled={isLoadingPoints}
+                  title="Refresh skate spots"
+                  className="h-9 w-9"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isLoadingPoints ? 'animate-spin' : ''}`} />
+                </Button>
+
+                {/* Search Box */}
+                <div className="relative max-w-md flex-1">
+                  <Command className="rounded-lg border shadow-sm" shouldFilter={false}>
+                    <CommandInput
+                      placeholder="Search for a skatepark by name or location..."
+                      value={searchQuery}
+                      onValueChange={setSearchQuery}
+                      className="h-9"
+                      // Remove the disabled state - never disable while searching
+                    />
+                    {searchQuery && (
+                      <div className="search-results-container absolute left-0 right-0 top-full z-[9999] mt-0.5 max-h-[300px] overflow-auto rounded-md border bg-background shadow-lg">
+                        <CommandList className="max-h-[300px] overflow-auto">
+                          {isSearching ? (
+                            <div className="flex items-center justify-center py-4">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span className="ml-2">Searching...</span>
+                            </div>
+                          ) : searchResults.length === 0 ? (
+                            <div className="py-4 text-center text-sm text-muted-foreground">
+                              {searchQuery.length < 3
+                                ? 'Type at least 3 characters to search'
+                                : 'No skateparks or locations found. Try a different search term.'}
+                            </div>
+                          ) : (
+                            <CommandGroup heading="Locations">
+                              {searchResults.map((result) => (
+                                <CommandItem
+                                  key={`${result.lat}-${result.lon}`}
+                                  value={result.display_name}
+                                  onSelect={() =>
+                                    handleSearchResultSelect(
+                                      result.lat,
+                                      result.lon,
+                                      result.display_name,
+                                    )
+                                  }
+                                  className="flex w-full cursor-pointer items-start gap-2 px-2 py-2 hover:bg-accent"
+                                >
+                                  <Search className="mt-1 h-4 w-4 shrink-0" />
+                                  <div className="flex-1">
+                                    <div className="font-medium">
+                                      {result.display_name.split(',')[0]}
+                                    </div>
+                                    <div className="text-sm text-muted-foreground">
+                                      {result.display_name}
+                                    </div>
                                   </div>
-                                  <div className="text-sm text-muted-foreground">
-                                    {result.display_name}
-                                  </div>
-                                </div>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        )}
-                      </CommandList>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          )}
+                        </CommandList>
+                      </div>
+                    )}
+                  </Command>
+                  {isSearching && (
+                    <div className="absolute right-3 top-[10px]">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                     </div>
                   )}
-                </Command>
+                </div>
+
+                {/* Loading Indicator */}
+                {isLoadingPoints && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="hidden sm:inline">Loading spots...</span>
+                  </div>
+                )}
               </div>
-              {isAdmin && (
-                <div className="flex flex-wrap gap-2">
+
+              {/* Admin Controls */}
+              {isUserAdmin && (
+                <div className="ml-2 flex flex-wrap items-center gap-2">
+                  <ImportSpotsButton onImportSuccess={() => fetchPoints(true)} />
+
+                  <DeleteAllSpotsDialog onDeleteSuccess={() => fetchPoints(true)} />
+
                   <Button
                     variant="outline"
                     size="sm"
-                    className="bg-white/50 hover:bg-white"
                     onClick={() => {
-                      setIsReportsDialogOpen(true)
-                      fetchAdminReports()
+                      if (isUserAdmin) {
+                        setIsReportsDialogOpen(true)
+                        fetchAdminReports()
+                      }
                     }}
+                    className="h-8"
                   >
-                    Manage Reports ({adminReports.length})
+                    <Flag className="mr-1 h-4 w-4" />
+                    <span className="hidden sm:inline">Reports</span>
+                    {adminReports.length > 0 && (
+                      <span className="bg-blue-100 ml-1 rounded-full px-1.5 py-0.5 text-xs font-semibold text-blue">
+                        {adminReports.length}
+                      </span>
+                    )}
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="bg-white/50 hover:bg-white"
                     onClick={() => {
-                      setIsAdminProposalsDialogOpen(true)
-                      fetchAdminProposals()
+                      if (isUserAdmin) {
+                        setIsAdminProposalsDialogOpen(true)
+                        fetchAdminProposals()
+                      }
                     }}
+                    className="h-8"
                   >
-                    Review Proposals ({adminProposals.length})
+                    <FileEdit className="mr-1 h-4 w-4" />
+                    <span className="hidden sm:inline">Proposals</span>
+                    {adminProposals.length > 0 && (
+                      <span className="bg-blue-100 ml-1 rounded-full px-1.5 py-0.5 text-xs font-semibold text-blue">
+                        {adminProposals.length}
+                      </span>
+                    )}
                   </Button>
                 </div>
               )}
             </div>
           </div>
+
+          {/* Welcome Message */}
           {showWelcomeMessage && (
             <div className="bg-blue-50 mt-4 rounded-lg p-3 text-sm text-blue">
               <div className="flex items-start justify-between">
@@ -2151,8 +2947,25 @@ export default function Map() {
               </div>
             </div>
           )}
+
+          {/* Error Message */}
+          {hasApiError && (
+            <div className="mt-2 bg-destructive/10 p-3 text-center">
+              <p className="mb-2 text-destructive">Failed to load skate spots</p>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setHasApiError(false)
+                  fetchPoints(true)
+                  toast.success('Retrying to load skate spots...')
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          )}
         </div>
-      </div>
+      </header>
 
       {/* Map container */}
       <div className="relative w-full flex-1">
@@ -2244,6 +3057,9 @@ export default function Map() {
                       icon={createMarkerIcon(true)}
                       eventHandlers={{
                         popupopen: () => {
+                          // Set loading states before triggering fetch operations
+                          setIsLoadingComments((prev) => ({ ...prev, [point.id]: true }))
+                          setIsLoadingLikes((prev) => ({ ...prev, [point.id]: true }))
                           handlePopupOpen(point.id)
                         },
                         add: (e) => {
@@ -2272,6 +3088,7 @@ export default function Map() {
             </div>
           ) : (
             <MarkerClusterGroup
+              key={clusterKey}
               chunkedLoading
               maxClusterRadius={80}
               spiderfyOnMaxZoom={true}
@@ -2290,6 +3107,9 @@ export default function Map() {
                     icon={createMarkerIcon(hasActiveSession)}
                     eventHandlers={{
                       popupopen: () => {
+                        // Set loading states before triggering fetch operations
+                        setIsLoadingComments((prev) => ({ ...prev, [point.id]: true }))
+                        setIsLoadingLikes((prev) => ({ ...prev, [point.id]: true }))
                         handlePopupOpen(point.id)
                       },
                       add: (e) => {
@@ -2330,7 +3150,7 @@ export default function Map() {
                 <div className="space-y-4">
                   <Textarea
                     value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
+                    onChange={(e) => handleCommentChange(e.target.value)}
                     placeholder="Share your thoughts about this spot..."
                     className="min-h-[100px]"
                     disabled={isAddingComment}
@@ -2360,8 +3180,11 @@ export default function Map() {
               <CardContent>
                 <ScrollArea className="h-[300px] pr-4">
                   {selectedSpotId && isLoadingComments[selectedSpotId] ? (
-                    <div className="flex items-center justify-center py-8">
-                      <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-gray-900"></div>
+                    <div className="flex h-full items-center justify-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-gray-900"></div>
+                        <p className="text-sm text-gray-500">Loading comments...</p>
+                      </div>
                     </div>
                   ) : (
                     <>
@@ -2373,11 +3196,7 @@ export default function Map() {
                                 <div className="flex-1 space-y-2">
                                   <Textarea
                                     value={editingComment.content}
-                                    onChange={(e) =>
-                                      setEditingComment((prev) =>
-                                        prev ? { ...prev, content: e.target.value } : null,
-                                      )
-                                    }
+                                    onChange={(e) => handleEditingCommentChange(e.target.value)}
                                     className="min-h-[100px]"
                                     disabled={isEditingComment}
                                   />
@@ -2410,10 +3229,24 @@ export default function Map() {
                                   </div>
                                 </div>
                               ) : (
-                                <p className="text-gray-700">{comment.content}</p>
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200">
+                                      <span className="text-sm font-medium text-gray-600">
+                                        {comment.createdByName.charAt(0).toUpperCase()}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <p className="font-medium text-gray-900">
+                                        {comment.createdByName}
+                                      </p>
+                                      <p className="text-sm text-gray-700">{comment.content}</p>
+                                    </div>
+                                  </div>
+                                </div>
                               )}
                               {(comment.createdBy === user.primaryEmailAddress?.emailAddress ||
-                                isAdmin) && (
+                                isUserAdmin) && (
                                 <div className="flex gap-2">
                                   <Button
                                     variant="ghost"
@@ -2495,6 +3328,17 @@ export default function Map() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="description">Description (Optional)</Label>
+              <Textarea
+                id="description"
+                value={newPointDescription}
+                onChange={(e) => handleDescriptionChange(e.target.value)}
+                placeholder="Enter a description of this spot"
+                className="min-h-[80px]"
+                disabled={isAddingPoint}
+              />
+            </div>
             <Button onClick={handleAddPoint} className="w-full" disabled={isAddingPoint}>
               {isAddingPoint ? (
                 <>
@@ -2521,7 +3365,7 @@ export default function Map() {
               <Textarea
                 id="reason"
                 value={reportReason}
-                onChange={(e) => setReportReason(e.target.value)}
+                onChange={(e) => handleReportReasonChange(e.target.value)}
                 placeholder="Please explain why this spot should be removed..."
                 className="min-h-[100px]"
                 required
@@ -2557,73 +3401,54 @@ export default function Map() {
                   <div className="text-sm text-muted-foreground">
                     {adminReports.length} reports pending review
                   </div>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={handleDenyAllReports}
-                    disabled={isDenyingAll || adminReports.length === 0}
-                  >
-                    {isDenyingAll ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Denying All...
-                      </>
-                    ) : (
-                      <>
-                        <X className="mr-2 h-4 w-4" />
-                        Deny All Reports
-                      </>
-                    )}
-                  </Button>
+                  {/* {isUserAdmin && (
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDenyAllReports}
+                        disabled={isDenyingAll || adminReports.length === 0}
+                      >
+                        {isDenyingAll ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Denying All...
+                          </>
+                        ) : (
+                          <>
+                            <X className="mr-2 h-4 w-4" />
+                            Deny All Reports
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )} */}
                 </div>
-                {adminReports.map((report) => (
-                  <Card key={report.id} className="mb-4">
-                    <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle className="text-lg">{report.spotName}</CardTitle>
-                          <p className="text-sm text-gray-500">
-                            Reported {formatDistanceToNow(report.createdAt, { addSuffix: true })}
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => handleUpdateReportStatus(report.id, 'accept')}
-                            disabled={isUpdatingReport[report.id]}
-                          >
-                            {isUpdatingReport[report.id] ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Removing...
-                              </>
-                            ) : (
-                              'Remove Spot'
-                            )}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleUpdateReportStatus(report.id, 'deny')}
-                            disabled={isUpdatingReport[report.id]}
-                          >
-                            {isUpdatingReport[report.id] ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Denying...
-                              </>
-                            ) : (
-                              'Deny Report'
-                            )}
-                          </Button>
-                        </div>
+                {adminReports.map((adminReport) => (
+                  <div key={adminReport.id} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">{adminReport.spotName}</p>
+                        <p className="text-sm text-gray-500">{adminReport.reason}</p>
                       </div>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-gray-700">{report.reason}</p>
-                    </CardContent>
-                  </Card>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleUpdateReportStatus(adminReport.id, 'accept')}
+                        >
+                          Accept
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleUpdateReportStatus(adminReport.id, 'deny')}
+                        >
+                          Deny
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </ScrollArea>
             )}
@@ -2636,31 +3461,24 @@ export default function Map() {
         isOpen={isEditProposalDialogOpen}
         onOpenChange={setIsEditProposalDialogOpen}
         spotToEdit={spotToEdit}
-        onSubmit={async (proposedName, proposedType, editReason) => {
-          if (!spotToEdit) return
+        onSubmit={async (proposedName, proposedType, proposedDescription, editReason) => {
+          if (!spotToEdit || !user) return
           setIsSubmittingProposal(true)
           try {
-            const response = await fetch(`/api/points/${spotToEdit.id}/proposals`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                proposedName,
-                proposedType,
-                reason: editReason,
-              }),
+            await submitEditProposal({
+              spotId: spotToEdit.id,
+              proposedName,
+              proposedType,
+              proposedDescription,
+              reason: editReason,
+              userId: user.id,
+              userEmail: user.primaryEmailAddress?.emailAddress || '',
             })
-
-            if (response.ok) {
-              setIsEditProposalDialogOpen(false)
-              toast.success('Edit proposal submitted successfully!')
-            } else {
-              toast.error('Failed to submit edit proposal. Please try again.')
-            }
+            setIsEditProposalDialogOpen(false)
+            toast.success('Edit proposal submitted successfully!')
           } catch (error) {
             console.error('Error submitting proposal:', error)
-            toast.error('An error occurred. Please try again.')
+            toast.error('Failed to submit edit proposal. Please try again.')
           } finally {
             setIsSubmittingProposal(false)
           }
@@ -2669,21 +3487,9 @@ export default function Map() {
       />
 
       {importResult && (
-        <div
-          className={`absolute left-1/2 top-40 z-50 -translate-x-1/2 rounded-lg bg-white/95 p-4 shadow-lg ${
-            importResult.success
-              ? 'border border-green-600 text-green-600'
-              : 'border-red-500 text-red-500'
-          }`}
-        >
-          <h3 className="font-semibold">
-            {importResult.success ? 'Import Successful' : 'Import Failed'}
-          </h3>
-          {importResult.success ? (
-            <p>Imported {importResult.imported} spots</p>
-          ) : (
-            <p className="text-red-500">{importResult.error}</p>
-          )}
+        <div className={`mt-2 text-sm ${importResult.success ? 'text-green-500' : 'text-red-500'}`}>
+          {importResult.message}
+          {importResult.count !== undefined && ` (${importResult.count} spots)`}
         </div>
       )}
 
@@ -2883,6 +3689,159 @@ export default function Map() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {isUserAdmin && (
+        <>
+          <Dialog open={isAdminReportsDialogOpen} onOpenChange={setIsAdminReportsDialogOpen}>
+            <DialogContent className="max-h-[80vh] w-[90vw] sm:max-w-[800px]">
+              <DialogHeader>
+                <DialogTitle>Manage Reports</DialogTitle>
+              </DialogHeader>
+              <div className="mt-4">
+                {isLoadingAdminReports ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                  </div>
+                ) : adminReports.length === 0 ? (
+                  <p className="text-center text-gray-500">No reports to manage</p>
+                ) : (
+                  <ScrollArea className="h-[60vh] pr-4">
+                    {adminReports.map((adminReport) => (
+                      <div key={adminReport.id} className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium">{adminReport.spotName}</p>
+                            <p className="text-sm text-gray-500">{adminReport.reason}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleUpdateReportStatus(adminReport.id, 'accept')}
+                            >
+                              Accept
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleUpdateReportStatus(adminReport.id, 'deny')}
+                            >
+                              Deny
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </ScrollArea>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isAdminProposalsDialogOpen} onOpenChange={setIsAdminProposalsDialogOpen}>
+            <DialogContent className="max-h-[80vh] w-[90vw] sm:max-w-[800px]">
+              <DialogHeader>
+                <DialogTitle>Review Edit Proposals</DialogTitle>
+              </DialogHeader>
+              <div className="mt-4">
+                {isLoadingAdminProposals ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                  </div>
+                ) : adminProposals.length === 0 ? (
+                  <p className="text-center text-gray-500">No proposals to review</p>
+                ) : (
+                  <ScrollArea className="h-[60vh] pr-4">
+                    {adminProposals.map((proposal) => (
+                      <Card key={proposal.id} className="mb-4">
+                        <CardHeader>
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <CardTitle className="text-lg">{proposal.spotName}</CardTitle>
+                              <p className="text-sm text-gray-500">
+                                Proposed by {proposal.userEmail}{' '}
+                                {formatDistanceToNow(proposal.createdAt, { addSuffix: true })}
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  handleUpdateProposal(proposal.spotId, proposal.id, 'approved')
+                                }
+                                disabled={isUpdatingProposal[proposal.id]}
+                              >
+                                {isUpdatingProposal[proposal.id] ? 'Approving...' : 'Approve'}
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() =>
+                                  handleUpdateProposal(proposal.spotId, proposal.id, 'rejected')
+                                }
+                                disabled={isUpdatingProposal[proposal.id]}
+                              >
+                                {isUpdatingProposal[proposal.id] ? 'Rejecting...' : 'Reject'}
+                              </Button>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-4">
+                            <div>
+                              <h4 className="font-medium">Current Details</h4>
+                              <p className="text-sm text-gray-600">
+                                Name: {proposal.currentName}
+                                <br />
+                                Type: {proposal.currentType}
+                              </p>
+                            </div>
+                            <div>
+                              <h4 className="font-medium">Proposed Changes</h4>
+                              <p className="text-sm text-gray-600">
+                                Name: {proposal.proposedName}
+                                <br />
+                                Type: {proposal.proposedType}
+                              </p>
+                            </div>
+                            <div>
+                              <h4 className="font-medium">Reason</h4>
+                              <p className="text-sm text-gray-600">{proposal.reason}</p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </ScrollArea>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
+
+      {/* Add the confirmation dialog */}
+      <AlertDialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the skate spot "{spotToDelete?.name}". This action cannot
+              be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

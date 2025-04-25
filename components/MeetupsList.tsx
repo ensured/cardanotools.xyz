@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { format } from 'date-fns'
 import { joinMeetup, leaveMeetup, deleteMeetup, editMeetup } from '@/app/actions/meetups'
 import { useUser } from '@clerk/nextjs'
-import { useAdmin } from '@/lib/hooks/useAdmin'
+import { isAdmin as isAdminHook } from '@/lib/hooks/isAdmin'
 import { Loader2, Trash2, Edit2, CalendarIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -38,7 +38,6 @@ interface MeetupsListProps {
 
 export function MeetupsList({ spotId, meetups, onMeetupsChange }: MeetupsListProps) {
   const { user } = useUser()
-  const isAdmin = useAdmin()
   const [isLoading, setIsLoading] = useState(false)
   const [isDeleting, setIsDeleting] = useState<Record<string, boolean>>({})
   const [isEditing, setIsEditing] = useState<Record<string, boolean>>({})
@@ -47,6 +46,15 @@ export function MeetupsList({ spotId, meetups, onMeetupsChange }: MeetupsListPro
   const [editDescription, setEditDescription] = useState('')
   const [editDate, setEditDate] = useState<Date | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+
+  useEffect(() => {
+    const checkAdmin = async () => {
+      const isAdmin = await isAdminHook()
+      setIsAdmin(isAdmin)
+    }
+    checkAdmin()
+  }, [])
 
   const hours = Array.from({ length: 12 }, (_, i) => i + 1)
 

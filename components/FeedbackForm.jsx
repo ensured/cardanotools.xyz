@@ -16,6 +16,8 @@ import { MessageCircleIcon, SendIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
 import { Controller } from 'react-hook-form'
+import { Input } from './ui/input'
+import { Label } from './ui/label'
 
 // Add validation schema
 const feedbackSchema = z.object({
@@ -23,6 +25,7 @@ const feedbackSchema = z.object({
     .string()
     .min(1, 'Feedback cannot be empty')
     .max(2000, 'Feedback cannot exceed 2000 characters'),
+  email: z.string().email('Please enter a valid email address').optional(),
 })
 
 export function FeedbackForm() {
@@ -36,7 +39,7 @@ export function FeedbackForm() {
     reset,
   } = useForm({
     resolver: zodResolver(feedbackSchema),
-    defaultValues: { feedback: '' },
+    defaultValues: { feedback: '', email: '' },
   })
 
   const onSubmit = async (data) => {
@@ -47,7 +50,10 @@ export function FeedbackForm() {
           'Content-Type': 'application/json',
           'x-wallet-address': window.cardano?.selectedAddress || '',
         },
-        body: JSON.stringify({ feedback: data.feedback }),
+        body: JSON.stringify({
+          feedback: data.feedback,
+          email: data.email || undefined,
+        }),
       })
 
       const result = await response.json()
@@ -73,21 +79,38 @@ export function FeedbackForm() {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <VisuallyHidden>
-            <DialogTitle>Send Feedback</DialogTitle>
-          </VisuallyHidden>
+          <DialogTitle>Send Feedback</DialogTitle>
         </DialogHeader>
         {isSubmitted ? (
           <div className="p-4 text-center text-green-600">Thank you for your feedback!</div>
         ) : (
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="grid gap-1.5">
+              <Label htmlFor="email">Email (optional)</Label>
+              <Controller
+                name="email"
+                control={control}
+                render={({ field }) => (
+                  <Input
+                    {...field}
+                    id="email"
+                    type="email"
+                    placeholder="your.email@example.com"
+                    className="w-full"
+                  />
+                )}
+              />
+              {errors.email && <p className="text-sm text-red-600">{errors.email.message}</p>}
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="feedback-text">Your Feedback</Label>
               <Controller
                 name="feedback"
                 control={control}
                 render={({ field }) => (
                   <Textarea
                     {...field}
+                    id="feedback-text"
                     placeholder="Your feedback..."
                     className="min-h-[150px] w-full rounded-md border p-2 text-sm"
                   />
@@ -100,8 +123,8 @@ export function FeedbackForm() {
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting}>
-                Send
-                <SendIcon className="size-3.5" />
+                {isSubmitting ? 'Sending...' : 'Send'}
+                {!isSubmitting && <SendIcon className="ml-1.5 size-3.5" />}
               </Button>
             </div>
           </form>

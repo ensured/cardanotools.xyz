@@ -2,23 +2,35 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { kv } from '@vercel/kv'
 
+interface LikeStatus {
+  email: string
+  name: string
+  status: 'like' | 'dislike' | null
+}
+
 interface MapPoint {
   id: string
   name: string
   type: 'street' | 'park' | 'diy'
   coordinates: [number, number]
   createdBy: string
-}
-
-interface LikeStatus {
-  userId: string
-  status: 'like' | 'dislike' | null
+  lastUpdated?: number
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const params = await context.params
-    const likes = (await kv.get<LikeStatus[]>(`likes:${params.id}`)) || []
+    const pointId = params.id
+
+    // Get the point to verify it exists
+    const point = await kv.get<MapPoint>(`point:${pointId}`)
+    if (!point) {
+      return new NextResponse('Spot not found', { status: 404 })
+    }
+
+    // Get likes from a separate collection instead of from the point object
+    const likes = (await kv.get<LikeStatus[]>(`point:${pointId}:likes`)) || []
+
     return NextResponse.json(likes)
   } catch (error) {
     console.error('[LIKES_GET]', error)
@@ -30,9 +42,21 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   try {
     const { userId } = await auth()
     const params = await context.params
+    const pointId = params.id
 
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
+    }
+
+    const user = await currentUser()
+    const userEmail = user?.emailAddresses[0]?.emailAddress
+    const userName =
+      user?.firstName && user?.lastName
+        ? `${user.firstName} ${user.lastName}`
+        : user?.firstName || user?.username || 'Anonymous'
+
+    if (!userEmail) {
+      return new NextResponse('User email not found', { status: 400 })
     }
 
     const { status } = await request.json()
@@ -41,34 +65,50 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       return new NextResponse('Invalid status', { status: 400 })
     }
 
-    // Check if the spot exists
-    const spot = await kv.get<MapPoint>(`point:${params.id}`)
-    if (!spot) {
+    // Get the point to verify it exists
+    const point = await kv.get<MapPoint>(`point:${pointId}`)
+    if (!point) {
       return new NextResponse('Spot not found', { status: 404 })
     }
 
-    // Get existing likes
-    const likes = (await kv.get<LikeStatus[]>(`likes:${params.id}`)) || []
-    const userLikeIndex = likes.findIndex((like) => like.userId === userId)
+    // Get existing likes from separate collection
+    const likes = (await kv.get<LikeStatus[]>(`point:${pointId}:likes`)) || []
+    const userLikeIndex = likes.findIndex((like) => like.email === userEmail)
+
+    let updatedLikes: LikeStatus[] = [...likes]
 
     if (userLikeIndex === -1) {
       // Add new like
-      likes.push({ userId, status })
+      if (status !== null) {
+        updatedLikes.push({ email: userEmail, name: userName, status })
+      }
     } else {
       // Update existing like
       if (status === null) {
         // Remove like if status is null
-        likes.splice(userLikeIndex, 1)
+        updatedLikes.splice(userLikeIndex, 1)
       } else {
         // Update like status
-        likes[userLikeIndex].status = status
+        updatedLikes[userLikeIndex].status = status
       }
     }
 
-    // Store updated likes
-    await kv.set(`likes:${params.id}`, likes)
+    // Use pipeline for atomic operations
+    const pipeline = kv.pipeline()
 
-    return NextResponse.json(likes)
+    // Store likes in a separate key
+    pipeline.set(`point:${pointId}:likes`, updatedLikes)
+
+    // Update the point's last updated timestamp
+    pipeline.set(`point:${pointId}`, {
+      ...point,
+      lastUpdated: Date.now(),
+    })
+
+    // Execute all operations atomically
+    await pipeline.exec()
+
+    return NextResponse.json(updatedLikes)
   } catch (error) {
     console.error('[LIKES_POST]', error)
     return new NextResponse('Internal Error', { status: 500 })
