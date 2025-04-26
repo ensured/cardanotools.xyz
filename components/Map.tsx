@@ -3,7 +3,15 @@
 import { toast } from 'sonner'
 import React from 'react'
 import { useEffect, useState, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet'
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  useMapEvents,
+  useMap,
+  ZoomControl,
+} from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import '@/styles/map.css'
 import {
@@ -234,7 +242,15 @@ interface NearbyMeetup {
 function ChangeView({ center, zoom }: { center: [number, number]; zoom: number }) {
   const map = useMap()
   useEffect(() => {
-    map.setView(center, zoom)
+    // Only update the view if the coordinates or zoom level have actually changed
+    // This prevents the map from resetting on popup opens
+    if (
+      map.getCenter().lat !== center[0] ||
+      map.getCenter().lng !== center[1] ||
+      map.getZoom() !== zoom
+    ) {
+      map.setView(center, zoom)
+    }
   }, [center, zoom, map])
   return null
 }
@@ -642,7 +658,7 @@ const PopupContent = React.memo(
                 }}
               >
                 <AlertTriangle className="mr-2 h-4 w-4" />
-                Report Spot
+                Report
               </Button>
 
               {(point.createdBy === user!.primaryEmailAddress?.emailAddress || isAdmin) && (
@@ -1558,6 +1574,15 @@ export default function Map() {
         p.id === tempSpotId ? { ...p, id: realSpotId } : p,
       )
 
+      // Update localStorage with the new points
+      try {
+        const updatedPoints = pointsCache.current
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedPoints))
+        localStorage.setItem(STORAGE_TIMESTAMP_KEY, Date.now().toString())
+      } catch (error) {
+        console.error('Error updating localStorage after adding new point:', error)
+      }
+
       // Show success message
       toast.success('Your new map point has been added successfully.')
 
@@ -1608,6 +1633,15 @@ export default function Map() {
       } else {
         // Invalidate cache on successful deletion
         setIsCacheValid(false)
+
+        // Update localStorage with the new points array (without the deleted point)
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(newPoints))
+          localStorage.setItem(STORAGE_TIMESTAMP_KEY, Date.now().toString())
+        } catch (error) {
+          console.error('Error updating localStorage after deletion:', error)
+        }
+
         toast.success('Spot deleted successfully')
       }
     } catch (error) {
@@ -2630,27 +2664,59 @@ export default function Map() {
 
     const checkForUpdates = async () => {
       try {
+        // First check the Last-Update header to see if there are any changes
         const response = await fetch('/api/points', { method: 'HEAD' })
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
-        // Removed: const { lastUpdate } = await response.json()
 
-        // Use current timestamp for comparison instead
-        const currentTimestamp = Date.now()
-        const oldestPoint = Math.min(...pointsCache.current.map((p) => p.lastUpdated || 0))
+        const serverLastUpdate = parseInt(response.headers.get('Last-Update') || '0', 10)
+        const localLastUpdate = parseInt(localStorage.getItem(STORAGE_TIMESTAMP_KEY) || '0', 10)
 
-        // Check if cache is older than CACHE_DURATION
-        if (currentTimestamp - oldestPoint > CACHE_DURATION) {
-          setIsCacheValid(false)
-          fetchPoints(true)
+        // If server data is newer or we need to check for deletions
+        if (serverLastUpdate > localLastUpdate || pointsCache.current.length > 0) {
+          console.log('Checking for updated or deleted spots...')
+
+          // Fetch all spots from the server to check for deletions
+          const fullResponse = await fetch('/api/points', {
+            cache: 'no-store',
+            headers: {
+              'Cache-Control': 'no-cache',
+              Pragma: 'no-cache',
+            },
+          })
+
+          if (fullResponse.ok) {
+            const serverData = await fullResponse.json()
+
+            // If server has fewer spots than cache, some spots were deleted
+            // Or if server has different IDs, we need to refresh
+            if (Array.isArray(serverData)) {
+              const serverIds = new Set(serverData.map((spot) => spot.id))
+              const cacheIds = new Set(pointsCache.current.map((spot) => spot.id))
+
+              const needsRefresh =
+                serverData.length !== pointsCache.current.length ||
+                ![...cacheIds].every((id) => serverIds.has(id))
+
+              if (needsRefresh) {
+                console.log('Spots have been changed or deleted, refreshing cache...')
+                setIsCacheValid(false)
+                fetchPoints(true)
+              }
+            }
+          }
         }
       } catch (error) {
         console.error('Error checking for updates:', error)
       }
     }
 
-    const interval = setInterval(checkForUpdates, CACHE_DURATION)
+    const interval = setInterval(checkForUpdates, CACHE_DURATION / 2) // Check more frequently
+
+    // Run immediately on mount
+    checkForUpdates()
+
     return () => clearInterval(interval)
   }, [isMounted])
 
@@ -2737,6 +2803,14 @@ export default function Map() {
 
     try {
       await handleDeletePoint(spotToDelete.id)
+
+      // Force refresh from server after successful deletion
+      setTimeout(() => {
+        fetchPoints(true)
+      }, 500)
+    } catch (error) {
+      console.error('Error during spot deletion:', error)
+      toast.error('An error occurred while deleting the spot.')
     } finally {
       setSpotToDelete(null)
       setIsDeleteConfirmOpen(false)
@@ -2961,6 +3035,7 @@ export default function Map() {
           style={{ height: '100%', width: '100%' }}
           ref={mapRef}
           scrollWheelZoom={true}
+          zoomControl={false} // Custom zoom controls in bottomright position
         >
           <ChangeView center={userLocation || [0, 0]} zoom={zoom} />
           {mapType === 'satellite' ? (
@@ -2974,6 +3049,7 @@ export default function Map() {
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             />
           )}
+          <ZoomControl position="bottomright" />
           <LocationMarker onLocationSelect={handleLocationSelect} />
 
           {/* Map Controls */}
@@ -3057,6 +3133,10 @@ export default function Map() {
                           setIsLoadingLikes((prev) => ({ ...prev, [point.id]: true }))
                           handlePopupOpen(point.id)
                         },
+                        click: (e: L.LeafletMouseEvent) => {
+                          // Prevent the click from propagating to the map
+                          L.DomEvent.stopPropagation(e)
+                        },
                         add: (e) => {
                           const markerElement = e.target.getElement()
                           if (markerElement) {
@@ -3117,6 +3197,10 @@ export default function Map() {
                         setIsLoadingComments((prev) => ({ ...prev, [point.id]: true }))
                         setIsLoadingLikes((prev) => ({ ...prev, [point.id]: true }))
                         handlePopupOpen(point.id)
+                      },
+                      click: (e: L.LeafletMouseEvent) => {
+                        // Prevent the click from propagating to the map
+                        L.DomEvent.stopPropagation(e)
                       },
                       add: (e) => {
                         const markerElement = e.target.getElement()
@@ -3363,7 +3447,7 @@ export default function Map() {
       <Dialog open={isReportDialogOpen} onOpenChange={setIsReportDialogOpen}>
         <DialogContent className="z-[9999] w-[90vw] sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Report Spot</DialogTitle>
+            <DialogTitle>Report Spot for Removal</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">

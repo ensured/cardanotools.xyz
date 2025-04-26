@@ -208,3 +208,24 @@
 .custom-marker-icon img {
   pointer-events: none !important;
 }
+
+/* Enhanced mobile touch handling */
+@media (max-width: 768px) {
+  /* Make marker touch targets larger */
+  .leaflet-marker-icon {
+    cursor: pointer;
+    touch-action: none; /* Disable browser handling of all touch events */
+  }
+
+  /* Prevent popup from disappearing too quickly on touch */
+  .leaflet-popup {
+    touch-action: none;
+  }
+
+  /* Make sure popup content is scrollable on mobile */
+  .leaflet-popup-content {
+    touch-action: pan-y; /* Allow vertical scrolling */
+    overflow-y: auto;
+    max-height: 70vh;
+  }
+}
