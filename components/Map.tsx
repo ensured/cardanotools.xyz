@@ -46,13 +46,10 @@ import {
   Edit,
   Maximize2,
   Minimize2,
-  Shield,
-  X,
   Users,
   Calendar,
   RefreshCw,
   Settings,
-  Upload,
   FileEdit,
   Trash,
   MessageSquare,
@@ -60,7 +57,6 @@ import {
   ChevronDown,
 } from 'lucide-react'
 import { importSpots } from '@/app/actions/import-spots'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Command,
   CommandEmpty,
@@ -79,9 +75,7 @@ import {
   getProposals,
   submitEditProposal,
   updateProposalStatus,
-  deleteLegacyPoints,
 } from '@/app/actions/admin'
-import { v7 as uuidv7 } from 'uuid'
 import { isAdmin } from '@/lib/hooks/isAdmin'
 import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
@@ -96,17 +90,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
-import { Switch } from '@/components/ui/switch'
-import debounce from 'lodash/debounce'
 import { DeleteAllSpotsDialog } from '@/components/DeleteAllSpotsDialog'
 // Import LeafletMouseEvent type
 import type { LeafletMouseEvent } from 'leaflet'
