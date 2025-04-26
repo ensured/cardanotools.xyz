@@ -1,7 +1,7 @@
 'use client'
 import dynamic from 'next/dynamic'
 
-const Map = dynamic(() => import('@/components/Map'), {
+const ProtectedMap = dynamic(() => import('@/components/ProtectedMap'), {
   ssr: false,
   loading: () => (
     <div className="flex h-screen items-center justify-center">
@@ -13,7 +13,7 @@ const Map = dynamic(() => import('@/components/Map'), {
 export default function MapPage() {
   return (
     <div className="h-screen w-full" suppressHydrationWarning>
-      <Map />
+      <ProtectedMap />
     </div>
   )
 }

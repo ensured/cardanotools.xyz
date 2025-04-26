@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { debounce } from 'lodash'
+import debounce from 'lodash/debounce'
 import {
   Select,
   SelectContent,
