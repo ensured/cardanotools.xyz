@@ -12,8 +12,8 @@ interface MapPoint {
   lastUpdated?: number
 }
 
-// Cache duration in seconds (1 hour)
-const CACHE_DURATION = 3600
+// Cache duration in seconds (5 minutes)
+const CACHE_DURATION = 300
 
 export async function GET() {
   try {

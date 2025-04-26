@@ -836,7 +836,7 @@ export default function Map() {
   const [isLoadingAddress, setIsLoadingAddress] = useState<Record<string, boolean>>({})
   const [lastFetchTime, setLastFetchTime] = useState<number>(0)
   const pointsCache = useRef<MapPoint[]>([])
-  const CACHE_DURATION = 60 * 60 * 1000 // 1 hour in milliseconds
+  const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes in milliseconds
   const [isCacheValid, setIsCacheValid] = useState(true)
   const [userState, setUserState] = useState<string | null>(null)
   const [userStateBounds, setUserStateBounds] = useState<{
