@@ -1,6 +1,10 @@
 {
   "compilerOptions": {
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -14,7 +18,9 @@
     "isolatedModules": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": [
+        "./*"
+      ]
     },
     "plugins": [
       {
@@ -22,27 +28,32 @@
       }
     ],
     "strictNullChecks": true,
-    "typeRoots": ["./types", "./node_modules/@types"],
+    "typeRoots": [
+      "./types",
+      "./node_modules/@types"
+    ],
     "target": "es2022",
     "jsx": "preserve"
   },
   "include": [
-    "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    ".next/types/**/*.ts",
-    "lib/fonts.js",
-    "components/**/*.js",
-    "components/**/*.ts",
-    "components/**/*.jsx",
     "app/**/*.js",
     "app/**/*.jsx",
     "app/**/*.ts",
     "app/**/*.tsx",
+    "components/**/*.js",
+    "components/**/*.jsx",
+    "components/**/*.ts",
     "hooks/**/*.js",
     "hooks/**/*.jsx",
     "hooks/**/*.ts",
-    "hooks/**/*.tsx"
+    "hooks/**/*.tsx",
+    "lib/fonts.js",
+    "next-env.d.ts",
+    ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules"
+  ]
 }

@@ -3034,6 +3034,17 @@ export default function Map() {
                 nearbySessions.map((session) => {
                   const point = points.find((p) => p.id === session.spotId)
                   if (!point) return null
+                  // Add check for valid coordinates
+                  if (
+                    !session.coordinates ||
+                    !Array.isArray(session.coordinates) ||
+                    session.coordinates.length !== 2 ||
+                    typeof session.coordinates[0] !== 'number' ||
+                    typeof session.coordinates[1] !== 'number'
+                  ) {
+                    console.warn('Invalid coordinates for session:', session.id)
+                    return null
+                  }
                   return (
                     <Marker
                       key={session.id}
@@ -3081,6 +3092,17 @@ export default function Map() {
               disableClusteringAtZoom={16}
             >
               {points.map((point) => {
+                // Add check for valid coordinates
+                if (
+                  !point.coordinates ||
+                  !Array.isArray(point.coordinates) ||
+                  point.coordinates.length !== 2 ||
+                  typeof point.coordinates[0] !== 'number' ||
+                  typeof point.coordinates[1] !== 'number'
+                ) {
+                  console.warn('Invalid coordinates for point:', point.id)
+                  return null
+                }
                 const hasActiveSession = nearbySessions.some(
                   (session) => session.spotId === point.id,
                 )
