@@ -3827,8 +3827,8 @@ export default function Map() {
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the skate spot "{spotToDelete?.name}". This action cannot
-              be undone.
+              This will permanently delete the skate spot &nbsp;{spotToDelete?.name}&nbsp;. This
+              action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
