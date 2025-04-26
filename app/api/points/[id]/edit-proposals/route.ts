@@ -29,9 +29,9 @@ interface Point {
   editProposals?: EditProposal[]
 }
 
-export async function GET(request: Request, context: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { id } = context.params
+    const { id } = params
 
     const point = await kv.get<Point>(`point:${id}`)
     if (!point) {
@@ -46,7 +46,7 @@ export async function GET(request: Request, context: { params: { id: string } })
   }
 }
 
-export async function POST(request: Request, context: { params: { id: string } }) {
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const { userId } = await auth()
     if (!userId) {
@@ -58,7 +58,7 @@ export async function POST(request: Request, context: { params: { id: string } }
       return NextResponse.json({ error: 'No email address found for user' }, { status: 401 })
     }
 
-    const { id } = context.params
+    const { id } = params
     const { proposedName, proposedType, proposedDescription, reason } = await request.json()
 
     if (!proposedName || !proposedType || !reason) {
@@ -100,14 +100,14 @@ export async function POST(request: Request, context: { params: { id: string } }
   }
 }
 
-export async function PATCH(request: Request, context: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const adminCheck = await isAdmin()
     if (!adminCheck) {
       return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 403 })
     }
 
-    const { id } = context.params
+    const { id } = params
     const { proposalId, status, adminNotes } = await request.json()
 
     if (!proposalId || !['approved', 'rejected'].includes(status)) {
