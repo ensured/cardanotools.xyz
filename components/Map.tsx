@@ -1604,14 +1604,14 @@ export default function Map() {
     }
   }
 
-  // Update the handleDeletePoint function
-  const handleDeletePoint = async (pointId: string) => {
-    if (!user) return
+  // Update the handleDeletePoint function to return success status
+  const handleDeletePoint = async (pointId: string): Promise<boolean> => {
+    if (!user) return false
 
     // Optimistic update
     setIsDeletingPoint((prev) => ({ ...prev, [pointId]: true }))
     const deletedPoint = points.find((p) => p.id === pointId)
-    if (!deletedPoint) return
+    if (!deletedPoint) return false
 
     // Create a new array without the deleted point
     const newPoints = points.filter((p) => p.id !== pointId)
@@ -1630,6 +1630,7 @@ export default function Map() {
         pointsCache.current = [...pointsCache.current, deletedPoint]
         setClusterKey((prev) => prev + 1) // Force cluster group to re-render
         toast.error('Failed to delete point. Please try again.')
+        return false
       } else {
         // Invalidate cache on successful deletion
         setIsCacheValid(false)
@@ -1643,6 +1644,7 @@ export default function Map() {
         }
 
         toast.success('Spot deleted successfully')
+        return true
       }
     } catch (error) {
       // Revert optimistic update on error
@@ -1651,6 +1653,7 @@ export default function Map() {
       setClusterKey((prev) => prev + 1) // Force cluster group to re-render
       console.error('Error deleting point:', error)
       toast.error('An error occurred. Please try again.')
+      return false
     } finally {
       setIsDeletingPoint((prev) => ({ ...prev, [pointId]: false }))
     }
@@ -2802,12 +2805,11 @@ export default function Map() {
     if (!spotToDelete) return
 
     try {
-      await handleDeletePoint(spotToDelete.id)
-
-      // Force refresh from server after successful deletion
-      setTimeout(() => {
-        fetchPoints(true)
-      }, 500)
+      const success = await handleDeletePoint(spotToDelete.id)
+      if (!success) {
+        console.error('Deletion failed')
+      }
+      // No need to fetch all points again since handleDeletePoint already does optimistic updates
     } catch (error) {
       console.error('Error during spot deletion:', error)
       toast.error('An error occurred while deleting the spot.')
