@@ -17,8 +17,9 @@ interface Report {
   userEmail: string
   reason: string
   createdAt: number
-  status: 'pending' | 'reviewed' | 'resolved'
+  status: 'pending' | 'reviewed' | 'resolved' | 'pending' | 'resolved' | 'rejected'
   adminNotes?: string
+  spotName?: string
 }
 
 interface Point {
@@ -30,6 +31,9 @@ interface Point {
   address?: string
   description?: string
   editProposals?: EditProposal[]
+  activeReports?: Report[]
+  activeProposals?: EditProposal[]
+  lastUpdated?: number
 }
 
 interface StoredProposal {
@@ -72,83 +76,32 @@ interface EditProposalSubmission {
   userEmail: string
 }
 
+const POINTS_KEY = 'points:all'
+
 export async function getReports() {
   try {
     const adminStatus = await checkAdmin()
     if (!adminStatus) {
       return { reports: [], error: 'Forbidden' }
     }
-
-    // New format for retrieving reports - scan all point keys and collect reports
-    const reportKeys = await kv.keys('report:*')
-
-    if (!reportKeys || reportKeys.length === 0) {
-      // Fallback to checking pointwise reports for backward compatibility
-      const pointKeys = await kv.keys('point:*')
-      const reports: Array<Report & { spotName?: string }> = []
-
-      // Process each point to extract its reports
-      await Promise.all(
-        pointKeys.map(async (key) => {
-          const pointId = key.replace('point:', '')
-          const pointReportsKey = `point:${pointId}:reports`
-
-          try {
-            const pointReports = await kv.get<Array<Report>>(pointReportsKey)
-            if (pointReports && Array.isArray(pointReports)) {
-              // Add spot name to reports
-              const point = await kv.get<Point>(`point:${pointId}`)
-              const reportsWithSpotName = pointReports.map((report) => ({
-                ...report,
-                spotId: pointId,
-                spotName: point?.name || 'Unknown Spot',
-              }))
-              reports.push(...reportsWithSpotName)
-            }
-          } catch (e) {
-            console.error(`Error fetching reports for point ${pointId}:`, e)
-          }
-        }),
-      )
-
-      return { reports, error: null }
-    }
-
-    // Process new format reports
-    const reports = await Promise.all(
-      reportKeys.map(async (key) => {
-        const report = await kv.get<Report & { spotName?: string }>(key)
-        if (!report) return null
-
-        // Fetch spot name if not included in report
-        if (report.spotId && !report.spotName) {
-          try {
-            const point = await kv.get<Point>(`point:${report.spotId}`)
-            if (point) {
-              return {
-                ...report,
-                id: key.replace('report:', ''),
-                spotName: point.name,
-              } as Report & { spotName: string }
-            }
-          } catch (e) {
-            console.error(`Error fetching spot name for report ${key}:`, e)
-          }
-        }
-
-        return {
-          ...report,
-          id: key.replace('report:', ''),
-        } as Report
-      }),
-    )
-
-    // Filter out null values and sort by creation date (newest first)
-    const validReports = reports
-      .filter((r): r is Report & { spotName?: string } => r !== null)
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-
-    return { reports: validReports, error: null }
+    // Read all points from points:all
+    const points: any[] = (await kv.get(POINTS_KEY)) || []
+    // Aggregate all activeReports from all points
+    const reports: Report[] = []
+    points.forEach((point) => {
+      if (point.activeReports && Array.isArray(point.activeReports)) {
+        point.activeReports.forEach((report: any) => {
+          reports.push({
+            ...report,
+            spotId: point.id,
+            spotName: point.name,
+          })
+        })
+      }
+    })
+    // Sort by creation date (newest first)
+    reports.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    return { reports, error: null }
   } catch (error) {
     console.error('Error fetching reports:', error)
     return { reports: [], error: 'Internal Server Error' }
@@ -160,30 +113,24 @@ export async function getProposals(): Promise<EditProposal[]> {
   if (!isUserAdmin) {
     throw new Error('Unauthorized')
   }
-
   try {
-    // Get all point keys
-    const pointKeys = await kv.keys('point:*')
-
-    // Fetch all points and their proposals
-    const points = await Promise.all(pointKeys.map(async (key) => await kv.get<Point>(key)))
-
-    // Collect all pending proposals from all points
+    // Read all points from points:all
+    const points: any[] = (await kv.get(POINTS_KEY)) || []
+    // Aggregate all activeProposals from all points
     const allProposals: EditProposal[] = []
     points.forEach((point) => {
-      if (point?.editProposals) {
-        const pendingProposals = point.editProposals
-          .filter((p) => p.status === 'pending')
-          .map((p) => ({
+      if (point.activeProposals && Array.isArray(point.activeProposals)) {
+        point.activeProposals.forEach((p: any) => {
+          allProposals.push({
             ...p,
             spotName: point.name,
             currentName: point.name,
             currentType: point.type,
-          }))
-        allProposals.push(...pendingProposals)
+            currentDescription: point.description,
+          })
+        })
       }
     })
-
     // Sort by creation date
     return allProposals.sort((a, b) => b.createdAt - a.createdAt)
   } catch (error) {
@@ -192,154 +139,50 @@ export async function getProposals(): Promise<EditProposal[]> {
   }
 }
 
-export async function updateReportStatus(reportId: string, status: 'accept' | 'deny') {
+export async function updateReportStatus(
+  reportId: string,
+  status: 'accept' | 'deny',
+  adminNotes?: string,
+) {
   try {
     const adminStatus = await checkAdmin()
     if (!adminStatus) {
       return { success: false, error: 'Forbidden' }
     }
-
+    // Read all points from points:all
+    const points: any[] = (await kv.get(POINTS_KEY)) || []
     let foundReport = false
-    let spotId: string | null = null
-
-    // Try to find the report in the new format first
-    const reportData = await kv.get<Report>(`report:${reportId}`)
-    console.log(
-      `Checking for report:${reportId} in new format:`,
-      reportData ? 'Found' : 'Not found',
-    )
-
-    if (reportData) {
-      foundReport = true
-      spotId = reportData.spotId
-
-      // If accepting the report, delete the spot
-      if (status === 'accept') {
-        await kv.del(`point:${spotId}`)
-      }
-
-      // Delete the individual report
-      await kv.del(`report:${reportId}`)
-    }
-
-    // Even if found in new format, check legacy format as well for cleanup
-    const legacyReportData = await kv.hget('reports', reportId)
-    console.log(
-      `Checking for report ${reportId} in legacy format:`,
-      legacyReportData ? 'Found' : 'Not found',
-    )
-
-    if (legacyReportData) {
-      foundReport = true
-      const legacySpotId = (legacyReportData as Report).spotId
-      spotId = spotId || legacySpotId
-
-      // Process legacy report
-      if (status === 'accept') {
-        await kv.hdel('points', legacySpotId)
-      }
-
-      await kv.hdel('reports', reportId)
-    }
-
-    // Check if the report might be stored within a point's reports array
-    if (!foundReport || !spotId) {
-      // Search all points for this report ID
-      const pointKeys = await kv.keys('point:*')
-
-      for (const key of pointKeys) {
-        const pointId = key.replace('point:', '')
-
-        // Check in point:${id}:reports
-        const reportsKey = `point:${pointId}:reports`
-        const pointReports = await kv.get<Report[]>(reportsKey)
-
-        if (pointReports) {
-          const reportIndex = pointReports.findIndex((r) => r.id === reportId)
-          if (reportIndex >= 0) {
-            foundReport = true
-            spotId = pointId
-            console.log(`Found report ${reportId} in point:${pointId}:reports`)
-
-            // Remove from the reports collection
-            const updatedReports = pointReports.filter((r) => r.id !== reportId)
-            await kv.set(reportsKey, updatedReports)
-            break
-          }
-        }
-
-        // Check in the point itself
-        const point = await kv.get<any>(key)
-        if (point?.reports && Array.isArray(point.reports)) {
-          const reportIndex = point.reports.findIndex((r: any) => r.id === reportId)
-          if (reportIndex >= 0) {
-            foundReport = true
-            spotId = pointId
-            console.log(`Found report ${reportId} in point:${pointId} data`)
-
-            // Remove from the point's reports array
-            const updatedPoint = {
-              ...point,
-              reports: point.reports.filter((r: any) => r.id !== reportId),
-              lastUpdated: Date.now(),
-            }
-            await kv.set(key, updatedPoint)
-            break
-          }
-        }
-      }
-    }
-
-    // If we have a spotId but the report wasn't found in point:${spotId}:reports,
-    // check there anyway as an extra safety measure
-    if (spotId) {
-      try {
-        const reportsKey = `point:${spotId}:reports`
-        const pointReports = (await kv.get<Report[]>(reportsKey)) || []
-        if (pointReports.some((r) => r.id === reportId)) {
+    let updatedPoints = points.map((point) => {
+      if (point.activeReports && Array.isArray(point.activeReports)) {
+        const reportIndex = point.activeReports.findIndex((r: any) => r.id === reportId)
+        if (reportIndex !== -1) {
           foundReport = true
-          console.log(
-            `Found report ${reportId} in point:${spotId}:reports (spot ID from other location)`,
-          )
-          const updatedReports = pointReports.filter((r) => r.id !== reportId)
-          await kv.set(reportsKey, updatedReports)
-        }
-
-        // Also check in the point itself
-        const point = await kv.get<any>(`point:${spotId}`)
-        if (point?.reports && Array.isArray(point.reports)) {
-          if (point.reports.some((r: any) => r.id === reportId)) {
-            foundReport = true
-            console.log(
-              `Found report ${reportId} in point:${spotId} data (spot ID from other location)`,
-            )
-            const updatedPoint = {
+          // Remove the report from the array
+          const updatedReports = point.activeReports.filter((r: any) => r.id !== reportId)
+          // If accepted, remove the point entirely from the array
+          if (status === 'accept') {
+            return null
+          } else {
+            // Just update the activeReports array (removing the denied report)
+            return {
               ...point,
-              reports: point.reports.filter((r: any) => r.id !== reportId),
+              activeReports: updatedReports,
               lastUpdated: Date.now(),
             }
-            await kv.set(`point:${spotId}`, updatedPoint)
           }
         }
-      } catch (e) {
-        console.error(`Error cleaning up report ${reportId} in point:${spotId} locations:`, e)
-        // Continue execution even if this fails
       }
-    }
-
+      return point
+    })
+    // Remove nulls if any points were deleted
+    updatedPoints = updatedPoints.filter(Boolean)
     if (!foundReport) {
-      // Check if this report ID pattern is a UUID v7 (starts with timestamp part)
-      const isV7Format =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reportId)
-      console.log(`Report not found in any storage location. Using UUID v7 format: ${isV7Format}`)
-
       return {
         success: false,
         error: `Report not found: ${reportId}. Please check if this report still exists.`,
       }
     }
-
-    console.log(`Successfully processed report ${reportId} with status ${status}`)
+    await kv.set(POINTS_KEY, updatedPoints)
     return { success: true, error: null }
   } catch (error) {
     console.error('Error updating report status:', error)
@@ -361,34 +204,36 @@ export async function submitEditProposal(submission: EditProposalSubmission) {
     // Log the attempt
     console.log(`Attempting to submit proposal for spot ${submission.spotId}`)
 
-    const spotData = await kv.get<Point>(`point:${submission.spotId}`)
-    if (!spotData) {
-      console.error(`Spot not found in KV store: ${submission.spotId}`)
+    // Read all points from points:all
+    const points: Point[] = (await kv.get(POINTS_KEY)) || []
+    const pointIndex = points.findIndex((p) => p.id === submission.spotId)
+    if (pointIndex === -1) {
+      console.error(`Spot not found in points:all: ${submission.spotId}`)
       throw new Error(`Spot not found: ${submission.spotId}`)
     }
+    const point = points[pointIndex]
 
     const newProposal: EditProposal = {
       id: `${Date.now()}-${Math.random().toString(36).substring(2)}`,
       ...submission,
       createdAt: Date.now(),
       status: 'pending',
-      spotName: spotData.name,
-      currentName: spotData.name,
-      currentType: spotData.type,
-      currentDescription: spotData.description,
+      spotName: point.name,
+      currentName: point.name,
+      currentType: point.type,
+      currentDescription: point.description,
     }
 
-    // Log the proposal being created
-    console.log(`Creating new proposal for spot ${spotData.name} (${submission.spotId})`)
-
-    // Add the proposal to the point's editProposals array
-    const updatedPoint: Point = {
-      ...spotData,
-      editProposals: [...(spotData.editProposals || []), newProposal],
+    // Add the proposal to the point's activeProposals array
+    const updatedActiveProposals = [...(point.activeProposals || []), newProposal]
+    points[pointIndex] = {
+      ...point,
+      activeProposals: updatedActiveProposals,
+      lastUpdated: Date.now(),
     }
 
-    // Store the updated point
-    await kv.set(`point:${submission.spotId}`, updatedPoint)
+    // Store the updated points array
+    await kv.set(POINTS_KEY, points)
 
     return { success: true, proposal: newProposal }
   } catch (error) {
@@ -411,39 +256,38 @@ export async function updateProposalStatus(
   }
 
   try {
-    const point = await kv.get<Point>(`point:${spotId}`)
-    if (!point) {
+    // Read all points from points:all
+    const points: Point[] = (await kv.get(POINTS_KEY)) || []
+    const pointIndex = points.findIndex((p) => p.id === spotId)
+    if (pointIndex === -1) {
       throw new Error('Point not found')
     }
-
-    const proposal = point.editProposals?.find((p) => p.id === proposalId)
+    const point = points[pointIndex]
+    const proposal = point.activeProposals?.find((p) => p.id === proposalId)
     if (!proposal) {
       throw new Error('Proposal not found')
     }
-
-    // Update the proposal's status and admin notes
-    const updatedProposals =
-      point.editProposals?.map((p) => (p.id === proposalId ? { ...p, status, adminNotes } : p)) ||
-      []
-
+    // Remove the proposal from the list
+    const updatedActiveProposals = (point.activeProposals || []).filter((p) => p.id !== proposalId)
     // If approving, update the point with proposed changes
     if (status === 'approved') {
-      await kv.set(`point:${spotId}`, {
+      points[pointIndex] = {
         ...point,
         name: proposal.proposedName,
         type: proposal.proposedType,
         description: proposal.proposedDescription,
         lastUpdated: Date.now(),
-        editProposals: updatedProposals,
-      })
+        activeProposals: updatedActiveProposals,
+      }
     } else {
       // If rejecting, just update the proposals array
-      await kv.set(`point:${spotId}`, {
+      points[pointIndex] = {
         ...point,
-        editProposals: updatedProposals,
-      })
+        lastUpdated: Date.now(),
+        activeProposals: updatedActiveProposals,
+      }
     }
-
+    await kv.set(POINTS_KEY, points)
     return { success: true }
   } catch (error) {
     console.error('Error updating proposal:', error)

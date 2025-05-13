@@ -11,6 +11,7 @@ interface MapPoint {
   coordinates: [number, number]
   createdBy: string
   lastUpdated?: number
+  activeProposals?: EditProposal[]
 }
 
 interface EditProposal {
@@ -79,16 +80,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     }
 
     // Get existing proposals
-    const proposals = (await kv.get<EditProposal[]>(`point:${pointId}:proposals`)) || []
+    const activeProposals = (await kv.get<EditProposal[]>(`point:${pointId}:activeProposals`)) || []
 
     // Add new proposal
-    const updatedProposals = [...proposals, proposal]
+    const updatedActiveProposals = [...activeProposals, proposal]
 
     // Use pipeline for atomic operations
     const pipeline = kv.pipeline()
 
     // Store proposals in a separate key
-    pipeline.set(`point:${pointId}:proposals`, updatedProposals)
+    pipeline.set(`point:${pointId}:activeProposals`, updatedActiveProposals)
 
     // Add to admin proposal list
     pipeline.lpush('admin:proposals', proposal)
@@ -97,6 +98,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     pipeline.set(`point:${pointId}`, {
       ...spot,
       lastUpdated: Date.now(),
+      activeProposals: updatedActiveProposals,
     })
 
     // Execute all operations atomically
@@ -126,9 +128,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     }
 
     // Get all proposals for this spot
-    const proposals = (await kv.get<EditProposal[]>(`point:${pointId}:proposals`)) || []
+    const activeProposals = (await kv.get<EditProposal[]>(`point:${pointId}:activeProposals`)) || []
 
-    return NextResponse.json(proposals)
+    return NextResponse.json(activeProposals)
   } catch (error) {
     console.error('Error fetching proposals:', error)
     return new NextResponse('Internal Server Error', { status: 500 })
@@ -153,15 +155,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     // Get all proposals for this spot
-    const proposals = (await kv.get<EditProposal[]>(`point:${pointId}:proposals`)) || []
+    const activeProposals = (await kv.get<EditProposal[]>(`point:${pointId}:activeProposals`)) || []
 
     // Find the proposal to update
-    const proposalIndex = proposals.findIndex((p) => p.id === proposalId)
+    const proposalIndex = activeProposals.findIndex((p) => p.id === proposalId)
     if (proposalIndex === -1) {
       return new NextResponse('Proposal not found', { status: 404 })
     }
 
-    const proposal = proposals[proposalIndex]
+    const proposal = activeProposals[proposalIndex]
 
     // Update the proposal with new status and notes
     const updatedProposal = {
@@ -171,13 +173,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     // Remove the proposal from the list
-    const updatedProposals = proposals.filter((p) => p.id !== proposalId)
+    const updatedActiveProposals = activeProposals.filter((p) => p.id !== proposalId)
 
     // Use pipeline for atomic operations
     const pipeline = kv.pipeline()
 
     // Update proposal store
-    pipeline.set(`point:${pointId}:proposals`, updatedProposals)
+    pipeline.set(`point:${pointId}:activeProposals`, updatedActiveProposals)
 
     // If approving, update the point
     if (status === 'approved') {
@@ -186,12 +188,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         name: proposal.proposedName,
         type: proposal.proposedType,
         lastUpdated: Date.now(),
+        activeProposals: updatedActiveProposals,
       })
     } else {
       // Just update the timestamp
       pipeline.set(`point:${pointId}`, {
         ...point,
         lastUpdated: Date.now(),
+        activeProposals: updatedActiveProposals,
       })
     }
 

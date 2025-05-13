@@ -76,7 +76,13 @@ import {
 } from '@/components/ui/command'
 import { MeetupDialog } from './MeetupDialog'
 import { MeetupsList } from './MeetupsList'
-import { createMeetup, getMeetups } from '@/app/actions/meetups'
+import {
+  createMeetup,
+  getMeetups,
+  joinMeetup,
+  leaveMeetup,
+  deleteMeetup,
+} from '@/app/actions/meetups'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import MarkerClusterGroup from 'react-leaflet-cluster'
 import {
@@ -104,6 +110,13 @@ import { DeleteAllSpotsDialog } from '@/components/DeleteAllSpotsDialog'
 import type { LeafletMouseEvent } from 'leaflet'
 import { ImportSpotsButton } from '@/app/components/ImportSpotsButton'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { MoreVertical, Edit2, Trash2 } from 'lucide-react'
 
 // Fix for default marker icons in Next.js
 const icon = L.icon({
@@ -165,6 +178,7 @@ interface Comment {
   createdByName: string
   createdAt: number
   updatedAt?: number
+  imageUrl?: string // Add this field to store commenter's profile image
 }
 
 interface LikeStatus {
@@ -186,9 +200,10 @@ interface AdminReport {
   userId: string
   reason: string
   createdAt: number
-  status: 'pending' | 'reviewed' | 'resolved'
+  status: 'pending' | 'reviewed' | 'resolved' | 'rejected'
   spotId: string
   spotName?: string
+  userEmail?: string
 }
 
 interface SearchResult {
@@ -232,8 +247,10 @@ interface NearbyMeetup {
   spotId: string
   spotName: string
   createdBy: string
-  createdByName: string
   createdByEmail: string
+  createdAt: number
+  participants: string[]
+  createdByName: string
   coordinates: [number, number]
   distance: number
 }
@@ -525,7 +542,7 @@ const PopupContent = React.memo(
     user,
     isAdmin,
     proposals,
-    reports,
+    activeReports,
     commentCounts,
     setSpotToDelete,
     setIsDeleteConfirmOpen,
@@ -548,7 +565,7 @@ const PopupContent = React.memo(
     user: any
     isAdmin: boolean
     proposals: EditProposal[]
-    reports: Report[]
+    activeReports: Report[]
     commentCounts: number
     setSpotToDelete: (spot: MapPoint | null) => void
     setIsDeleteConfirmOpen: (open: boolean) => void
@@ -700,11 +717,11 @@ const PopupContent = React.memo(
           </div>
         )}
 
-        {reports?.length > 0 && (
+        {activeReports?.length > 0 && (
           <div className="mt-2 rounded-md border border-yellow-200 bg-yellow-50 p-0.5">
             <p className="text-sm text-yellow-800">⚠️ This spot has been reported for removal</p>
             <p className="mt-1 text-xs text-yellow-600">
-              {reports.length} report{reports.length !== 1 ? 's' : ''}
+              {activeReports.length} report{activeReports.length !== 1 ? 's' : ''}
             </p>
           </div>
         )}
@@ -732,7 +749,7 @@ const PopupContent = React.memo(
                 )
               }}
             >
-              <ThumbsUp className="h-4 w-4" />
+              <ThumbsUp className="animate-thumb-click h-4 w-4 transition-transform duration-200" />
               <span>{likes?.filter((l) => l.status === 'like').length || 0}</span>
             </Button>
             <Button
@@ -750,7 +767,7 @@ const PopupContent = React.memo(
                 )
               }}
             >
-              <ThumbsDown className="h-4 w-4" />
+              <ThumbsDown className="animate-thumb-click h-4 w-4 transition-transform duration-200" />
               <span>{likes?.filter((l) => l.status === 'dislike').length || 0}</span>
             </Button>
             <Button
@@ -773,6 +790,51 @@ const PopupContent = React.memo(
 )
 
 PopupContent.displayName = 'PopupContent'
+
+// Add this new component before the Map component
+const DescriptionInput = React.memo(
+  ({
+    value,
+    onChange,
+    disabled,
+  }: {
+    value: string
+    onChange: (value: string) => void
+    disabled?: boolean
+  }) => {
+    const inputRef = React.useRef<HTMLTextAreaElement>(null)
+    const localValueRef = React.useRef(value)
+
+    React.useEffect(() => {
+      if (inputRef.current && value !== localValueRef.current) {
+        inputRef.current.value = value
+        localValueRef.current = value
+      }
+    }, [value])
+
+    return (
+      <Textarea
+        ref={inputRef}
+        id="description"
+        defaultValue={value}
+        onBlur={(e) => {
+          const newValue = e.target.value
+          if (newValue !== localValueRef.current) {
+            localValueRef.current = newValue
+            onChange(newValue)
+          }
+        }}
+        placeholder="Enter a description of this spot"
+        className="min-h-[80px]"
+        disabled={disabled}
+      />
+    )
+  },
+  (prevProps, nextProps) => {
+    return prevProps.disabled === nextProps.disabled && prevProps.value === nextProps.value
+  },
+)
+DescriptionInput.displayName = 'DescriptionInput'
 
 export default function Map() {
   const { user, isLoaded } = useUser()
@@ -802,8 +864,8 @@ export default function Map() {
   const [reportReason, setReportReason] = useState('')
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
   const [spotToReport, setSpotToReport] = useState<string | null>(null)
-  const [reports, setReports] = useState<Record<string, Report[]>>({})
-  const [isLoadingReports, setIsLoadingReports] = useState<Record<string, boolean>>({})
+  const [activeReports, setActiveReports] = useState<Record<string, Report[]>>({})
+  const [isLoadingActiveReports, setIsLoadingActiveReports] = useState<Record<string, boolean>>({})
   const [isImporting, setIsImporting] = useState(false)
   const [importResult, setImportResult] = useState<{
     success: boolean
@@ -852,7 +914,8 @@ export default function Map() {
   const [isLoadingAddress, setIsLoadingAddress] = useState<Record<string, boolean>>({})
   const [lastFetchTime, setLastFetchTime] = useState<number>(0)
   const pointsCache = useRef<MapPoint[]>([])
-  const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes in milliseconds
+  const CACHE_DURATION = 24 * 60 * 60 * 1000 // 24 hours
+  const STALE_WHILE_REVALIDATE = 2 * 24 * 60 * 60 * 1000 // 48 hours
   const [isCacheValid, setIsCacheValid] = useState(true)
   const [userState, setUserState] = useState<string | null>(null)
   const [userStateBounds, setUserStateBounds] = useState<{
@@ -868,7 +931,6 @@ export default function Map() {
   const [isUserAdmin, setIsUserAdmin] = useState(false)
   const STORAGE_KEY = 'map_points_cache'
   const STORAGE_TIMESTAMP_KEY = 'map_points_cache_timestamp'
-  const [hasApiError, setHasApiError] = useState(false)
 
   // Add cache for nearby sessions
   const nearbySessionsCache = useRef<{
@@ -880,7 +942,7 @@ export default function Map() {
   } | null>(null)
 
   // Define cache duration in milliseconds (5 minutes)
-  const SESSION_CACHE_DURATION = 5 * 60 * 1000
+  const SESSION_CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
 
   // Add state for the spot to delete confirmation
   const [spotToDelete, setSpotToDelete] = useState<MapPoint | null>(null)
@@ -1306,124 +1368,50 @@ export default function Map() {
     setIsLoadingPoints(true)
 
     try {
-      // First check if we need to refresh by checking the API's Last-Update header
-      const lastUpdateResponse = await fetch('/api/points', {
-        method: 'HEAD',
-        cache: 'no-store',
+      // First try to use localStorage cache
+      const storedData = localStorage.getItem(STORAGE_KEY)
+      const storedTimestamp = localStorage.getItem(STORAGE_TIMESTAMP_KEY)
+
+      if (!forceRefresh && storedData && storedTimestamp) {
+        const timestamp = parseInt(storedTimestamp, 10)
+        const isStale = now - timestamp > CACHE_DURATION
+        const isTooOld = now - timestamp > STALE_WHILE_REVALIDATE
+
+        // If data is not too old, use it immediately
+        if (!isTooOld) {
+          const parsedPoints = JSON.parse(storedData)
+          setPoints(parsedPoints)
+          pointsCache.current = parsedPoints
+
+          // If data is stale but not too old, use it but refresh in background
+          if (isStale) {
+            fetchPoints(true).catch(console.error)
+          }
+
+          setIsLoadingPoints(false)
+          return
+        }
+      }
+
+      // If no cache or cache too old, fetch fresh data
+      const response = await fetch('/api/points', {
         headers: {
           'Cache-Control': 'no-cache',
           Pragma: 'no-cache',
         },
       })
 
-      let needsRefresh = true
+      if (response.ok) {
+        const data = await response.json()
+        setPoints(data)
+        pointsCache.current = data
 
-      // Only try to use cache if we're not forcing a refresh
-      if (!forceRefresh) {
-        try {
-          // Try to load from localStorage
-          const storedTimestamp = localStorage.getItem(STORAGE_TIMESTAMP_KEY)
-          const storedPoints = localStorage.getItem(STORAGE_KEY)
-
-          // If Last-Update header is available, use it to determine if cache is valid
-          if (lastUpdateResponse.ok && storedTimestamp && storedPoints) {
-            const localTimestamp = parseInt(storedTimestamp, 10)
-            const serverLastUpdate = parseInt(
-              lastUpdateResponse.headers.get('Last-Update') || '0',
-              10,
-            )
-
-            // If local cache is newer than server's last update, use it
-            if (serverLastUpdate <= localTimestamp) {
-              const parsedPoints = JSON.parse(storedPoints) as MapPoint[]
-              if (parsedPoints.length > 0) {
-                console.log('Using localStorage cache - server data has not changed')
-                setPoints(parsedPoints)
-                pointsCache.current = parsedPoints
-                setLastFetchTime(localTimestamp)
-                setIsLoadingPoints(false)
-                needsRefresh = false
-                return
-              }
-            }
-          }
-
-          // If server data check failed, fall back to time-based cache check
-          if (needsRefresh && storedTimestamp && storedPoints) {
-            const timestamp = parseInt(storedTimestamp, 10)
-            // Check if cache is still fresh (within CACHE_DURATION)
-            if (now - timestamp < CACHE_DURATION) {
-              const parsedPoints = JSON.parse(storedPoints) as MapPoint[]
-              if (parsedPoints.length > 0) {
-                console.log('Using localStorage time-based cache')
-                setPoints(parsedPoints)
-                pointsCache.current = parsedPoints
-                setLastFetchTime(timestamp)
-                setIsLoadingPoints(false)
-                needsRefresh = false
-                return
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error loading points from localStorage:', error)
-          // Continue to fetch from API if localStorage fails
-        }
-      }
-
-      // If we still need to refresh at this point, fetch from API
-      if (needsRefresh) {
-        console.log('Fetching fresh data from API')
-
-        const response = await fetch('/api/points', {
-          cache: 'no-store',
-          headers: {
-            'Cache-Control': 'no-cache',
-            Pragma: 'no-cache',
-          },
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-
-          // Make sure we have an array
-          if (Array.isArray(data)) {
-            console.log(`Loaded ${data.length} points from API`)
-
-            if (data.length === 0) {
-              toast.info('No skate spots found. Try importing spots first!')
-              setIsLoadingPoints(false)
-              return
-            }
-
-            // Update state and cache
-            pointsCache.current = data
-            setPoints(data)
-            setLastFetchTime(now)
-
-            // Store in localStorage for persistent caching
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-              localStorage.setItem(STORAGE_TIMESTAMP_KEY, now.toString())
-            } catch (error) {
-              console.error('Error saving points to localStorage:', error)
-            }
-          } else {
-            console.error('API returned non-array data:', data)
-            setHasApiError(true)
-            toast.error('Received invalid data from API. Please try again.')
-          }
-        } else {
-          const errorText = await response.text()
-          console.error('Failed to fetch points:', errorText)
-          setHasApiError(true)
-          toast.error('Could not load skate spots. Please try again later.')
-        }
+        // Update localStorage
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+        localStorage.setItem(STORAGE_TIMESTAMP_KEY, now.toString())
       }
     } catch (error) {
       console.error('Error fetching points:', error)
-      setHasApiError(true)
-      toast.error('Failed to load skate spots. Please check your connection and try again.')
     } finally {
       setIsLoadingPoints(false)
     }
@@ -1675,32 +1663,15 @@ export default function Map() {
     }
   }
 
+  // First, fix the handleAddComment function to properly maintain the commenter order
   const handleAddComment = async (spotId: string) => {
-    if (!newComment.trim() || !user) return
-
-    // Optimistic update with a temporary ID
-    const tempId = 'temp-' + Date.now().toString()
-    const newCommentObj: Comment = {
-      id: tempId,
-      content: newComment.trim(),
-      createdBy: user.primaryEmailAddress?.emailAddress || '',
-      createdByName:
-        user.firstName && user.lastName
-          ? `${user.firstName} ${user.lastName}`
-          : user.firstName || user.username || 'Anonymous',
-      createdAt: Date.now(),
+    if (!newComment.trim()) return
+    if (!user) {
+      toast.error('Please sign in to add a comment')
+      return
     }
 
     setIsAddingComment(true)
-    setComments((prev) => ({
-      ...prev,
-      [spotId]: [...(prev[spotId] || []), newCommentObj],
-    }))
-    setCommentCounts((prev) => ({
-      ...prev,
-      [spotId]: (prev[spotId] || 0) + 1,
-    }))
-    setNewComment('')
 
     try {
       const response = await fetch(`/api/points/${spotId}/comments`, {
@@ -1708,40 +1679,27 @@ export default function Map() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content: newComment }),
+        body: JSON.stringify({
+          content: newComment,
+          imageUrl: user.imageUrl, // Add the user's profile image URL
+        }),
       })
 
-      if (response.ok) {
-        const savedComment = await response.json()
-        // Update the comment with the real ID from the backend
-        setComments((prev) => ({
-          ...prev,
-          [spotId]: prev[spotId].map((c) => (c.id === tempId ? savedComment : c)),
-        }))
-      } else {
-        // Revert optimistic update on error
-        setComments((prev) => ({
-          ...prev,
-          [spotId]: prev[spotId].filter((c) => c.id !== tempId),
-        }))
-        setCommentCounts((prev) => ({
-          ...prev,
-          [spotId]: (prev[spotId] || 1) - 1,
-        }))
-        toast.error('Failed to add comment. Please try again.')
+      if (!response.ok) {
+        throw new Error('Failed to add comment')
       }
+
+      const data = await response.json()
+
+      // Fetch the updated comments to ensure we're displaying data correctly
+      await fetchComments(spotId)
+
+      // Reset the comment field
+      setNewComment('')
+      toast.success('Comment added')
     } catch (error) {
-      // Revert optimistic update on error
-      setComments((prev) => ({
-        ...prev,
-        [spotId]: prev[spotId].filter((c) => c.id !== tempId),
-      }))
-      setCommentCounts((prev) => ({
-        ...prev,
-        [spotId]: (prev[spotId] || 1) - 1,
-      }))
       console.error('Error adding comment:', error)
-      toast.error('An error occurred. Please try again.')
+      toast.error('Failed to add comment. Please try again.')
     } finally {
       setIsAddingComment(false)
     }
@@ -1918,7 +1876,7 @@ export default function Map() {
       if (response.ok) {
         const newReport = await response.json()
         // Update the local reports state
-        setReports((prev) => ({
+        setActiveReports((prev) => ({
           ...prev,
           [spotToReport]: [...(prev[spotToReport] || []), newReport],
         }))
@@ -1940,17 +1898,17 @@ export default function Map() {
 
   // Add function to fetch reports
   const fetchReports = async (spotId: string) => {
-    setIsLoadingReports((prev) => ({ ...prev, [spotId]: true }))
+    setIsLoadingActiveReports((prev) => ({ ...prev, [spotId]: true }))
     try {
       const response = await fetch(`/api/points/${spotId}/report`)
       if (response.ok) {
         const data = await response.json()
-        setReports((prev) => ({ ...prev, [spotId]: data }))
+        setActiveReports((prev) => ({ ...prev, [spotId]: data }))
       }
     } catch (error) {
       console.error('Error fetching reports:', error)
     } finally {
-      setIsLoadingReports((prev) => ({ ...prev, [spotId]: false }))
+      setIsLoadingActiveReports((prev) => ({ ...prev, [spotId]: false }))
     }
   }
 
@@ -2170,7 +2128,7 @@ export default function Map() {
         toast.success('Spot removed successfully')
       } else {
         // Update the local reports state to remove the denied report
-        setReports((prev) => ({
+        setActiveReports((prev) => ({
           ...prev,
           [report.spotId]: prev[report.spotId]?.filter((r) => r.id !== reportId) || [],
         }))
@@ -2290,82 +2248,82 @@ export default function Map() {
     }
   }
 
-  // Add function to fetch nearby sessions with caching
+  // Helper function to calculate distance between two points
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371 // Earth's radius in km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180
+    const dLon = ((lon2 - lon1) * Math.PI) / 180
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return R * c
+  }
+
   const fetchNearbySessions = async () => {
-    if (!mapRef.current) return
-
-    const center = mapRef.current.getCenter()
-    const radius = Math.max(50, Math.min(150, 30 * Math.pow(2, 16 - mapRef.current.getZoom())))
-    const now = Date.now()
-
-    // Check if we have a valid cached result
-    if (nearbySessionsCache.current) {
-      const cache = nearbySessionsCache.current
-      const distanceFromCache = calculateDistance(center.lat, center.lng, cache.lat, cache.lng)
-
-      // Use cache if it's fresh (< 5 min old), we're within 10km of the cached position,
-      // and the radius is similar (± 20%)
-      const isFresh = now - cache.timestamp < SESSION_CACHE_DURATION
-      const isNearby = distanceFromCache < 10 // 10km
-      const isRadiusSimilar = Math.abs(cache.radius - radius) / cache.radius < 0.2
-
-      if (isFresh && isNearby && isRadiusSimilar) {
-        console.log(
-          `Using cached sessions: fresh(${isFresh}), nearby(${distanceFromCache.toFixed(2)}km), radius(${isRadiusSimilar})`,
-        )
-        setNearbySessions(cache.sessions)
-        return
-      }
-    }
-
     setIsLoadingNearbySessions(true)
-
     try {
-      console.log(`Fetching sessions with radius: ${radius}km at zoom: ${mapRef.current.getZoom()}`)
-
-      const response = await fetch(
-        `/api/meetups/nearby?lat=${center.lat}&lng=${center.lng}&radius=${radius}`,
-      )
-
-      if (response.ok) {
-        const data = await response.json()
-        console.log(`Found ${data.length} nearby sessions`)
-
-        // Update cache
-        nearbySessionsCache.current = {
-          lat: center.lat,
-          lng: center.lng,
-          radius,
-          timestamp: now,
-          sessions: data,
-        }
-
-        setNearbySessions(data)
-
-        // Force update cluster markers to refresh the purple dots
-        setClusterKey((prevKey) => prevKey + 1)
+      // Get current map bounds
+      const bounds = mapRef.current?.getBounds()
+      if (!bounds) {
+        throw new Error('Map bounds not available')
       }
+
+      // Filter points that are within the current map bounds
+      const pointsInBounds = points.filter((point) => {
+        const [lat, lng] = point.coordinates
+        return bounds.contains([lat, lng])
+      })
+
+      // Fetch meetups for points within bounds
+      const allMeetups: NearbyMeetup[] = []
+      for (const point of pointsInBounds) {
+        try {
+          const meetups = await getMeetups(point.id)
+          if (Array.isArray(meetups)) {
+            for (const m of meetups) {
+              // Calculate distance from center of map
+              const [lat, lng] = point.coordinates
+              const center = mapRef.current?.getCenter()
+              const distance = center ? calculateDistance(center.lat, center.lng, lat, lng) : 0
+
+              allMeetups.push({
+                ...m,
+                coordinates: point.coordinates,
+                spotName: point.name,
+                distance,
+              } as NearbyMeetup)
+            }
+          }
+        } catch (error) {
+          console.error(`Error fetching meetups for point ${point.id}:`, error)
+          // Continue with other points even if one fails
+          continue
+        }
+      }
+
+      // Remove duplicates by meetup id and sort by distance
+      const seen = new Set<string>()
+      const uniqueMeetups = allMeetups
+        .filter((meetup) => {
+          if (seen.has(meetup.id)) {
+            return false
+          }
+          seen.add(meetup.id)
+          return true
+        })
+        .sort((a, b) => (a as NearbyMeetup).distance - (b as NearbyMeetup).distance)
+
+      setNearbySessions(uniqueMeetups as NearbyMeetup[])
     } catch (error) {
       console.error('Error fetching nearby sessions:', error)
       toast.error('Failed to fetch nearby sessions')
     } finally {
       setIsLoadingNearbySessions(false)
     }
-  }
-
-  // Helper function to calculate distance between coordinates in km
-  const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
-    const R = 6371 // Earth's radius in km
-    const dLat = (lat2 - lat1) * (Math.PI / 180)
-    const dLng = (lng2 - lng1) * (Math.PI / 180)
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * (Math.PI / 180)) *
-        Math.cos(lat2 * (Math.PI / 180)) *
-        Math.sin(dLng / 2) *
-        Math.sin(dLng / 2)
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    return R * c
   }
 
   // Update effect to fetch nearby sessions when toggle is changed
@@ -2610,7 +2568,7 @@ export default function Map() {
         user={user}
         isAdmin={isUserAdmin}
         proposals={proposals[point.id] || []}
-        reports={reports[point.id] || []}
+        activeReports={activeReports[point.id] || []}
         commentCounts={commentCounts[point.id] || 0}
         setSpotToDelete={setSpotToDelete}
         setIsDeleteConfirmOpen={setIsDeleteConfirmOpen}
@@ -2667,57 +2625,25 @@ export default function Map() {
 
     const checkForUpdates = async () => {
       try {
-        // First check the Last-Update header to see if there are any changes
         const response = await fetch('/api/points', { method: 'HEAD' })
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
+        if (!response.ok) throw new Error('Failed to check for updates')
 
         const serverLastUpdate = parseInt(response.headers.get('Last-Update') || '0', 10)
         const localLastUpdate = parseInt(localStorage.getItem(STORAGE_TIMESTAMP_KEY) || '0', 10)
 
-        // If server data is newer or we need to check for deletions
-        if (serverLastUpdate > localLastUpdate || pointsCache.current.length > 0) {
-          console.log('Checking for updated or deleted spots...')
-
-          // Fetch all spots from the server to check for deletions
-          const fullResponse = await fetch('/api/points', {
-            cache: 'no-store',
-            headers: {
-              'Cache-Control': 'no-cache',
-              Pragma: 'no-cache',
-            },
-          })
-
-          if (fullResponse.ok) {
-            const serverData = await fullResponse.json()
-
-            // If server has fewer spots than cache, some spots were deleted
-            // Or if server has different IDs, we need to refresh
-            if (Array.isArray(serverData)) {
-              const serverIds = new Set(serverData.map((spot) => spot.id))
-              const cacheIds = new Set(pointsCache.current.map((spot) => spot.id))
-
-              const needsRefresh =
-                serverData.length !== pointsCache.current.length ||
-                ![...cacheIds].every((id) => serverIds.has(id))
-
-              if (needsRefresh) {
-                console.log('Spots have been changed or deleted, refreshing cache...')
-                setIsCacheValid(false)
-                fetchPoints(true)
-              }
-            }
-          }
+        // Only fetch if server data is newer
+        if (serverLastUpdate > localLastUpdate) {
+          await fetchPoints(true)
         }
       } catch (error) {
         console.error('Error checking for updates:', error)
       }
     }
 
-    const interval = setInterval(checkForUpdates, CACHE_DURATION / 2) // Check more frequently
+    // Check less frequently
+    const interval = setInterval(checkForUpdates, CACHE_DURATION)
 
-    // Run immediately on mount
+    // Initial check
     checkForUpdates()
 
     return () => clearInterval(interval)
@@ -2749,35 +2675,35 @@ export default function Map() {
   useEffect(() => {
     if (!mapRef.current || !showNearbySessions) return
 
-    // Track last fetch position and zoom
     let lastLat = 0
     let lastLng = 0
     let lastZoom = 0
+    let timeout: NodeJS.Timeout
 
-    const handleMapChange = debounce(() => {
-      if (!mapRef.current) return
+    const handleMapChange = () => {
+      if (timeout) clearTimeout(timeout)
 
-      const center = mapRef.current.getCenter()
-      const zoom = mapRef.current.getZoom()
+      timeout = setTimeout(() => {
+        if (!mapRef.current) return
 
-      // Only fetch if moved significantly (more than 0.01 degrees or ~1km) or zoom changed
-      const latDiff = Math.abs(center.lat - lastLat)
-      const lngDiff = Math.abs(center.lng - lastLng)
-      const zoomChanged = zoom !== lastZoom
+        const center = mapRef.current.getCenter()
+        const zoom = mapRef.current.getZoom()
 
-      // Significant movement threshold
-      const moveThreshold = 0.01
+        // Only fetch if moved significantly (more than 0.05 degrees or ~5km) or zoom changed
+        const latDiff = Math.abs(center.lat - lastLat)
+        const lngDiff = Math.abs(center.lng - lastLng)
+        const zoomChanged = zoom !== lastZoom
 
-      if (zoomChanged || latDiff > moveThreshold || lngDiff > moveThreshold) {
-        console.log(
-          `Fetching sessions: movement(${latDiff.toFixed(4)},${lngDiff.toFixed(4)}) or zoom changed(${zoomChanged})`,
-        )
-        lastLat = center.lat
-        lastLng = center.lng
-        lastZoom = zoom
-        fetchNearbySessions()
-      }
-    }, 2000) // Increase debounce to 2 seconds
+        const moveThreshold = 0.05 // Increased threshold to reduce updates
+
+        if (zoomChanged || latDiff > moveThreshold || lngDiff > moveThreshold) {
+          lastLat = center.lat
+          lastLng = center.lng
+          lastZoom = zoom
+          fetchNearbySessions()
+        }
+      }, 2000) // 2 second debounce
+    }
 
     mapRef.current.on('moveend', handleMapChange)
     mapRef.current.on('zoomend', handleMapChange)
@@ -2787,6 +2713,7 @@ export default function Map() {
         mapRef.current.off('moveend', handleMapChange)
         mapRef.current.off('zoomend', handleMapChange)
       }
+      if (timeout) clearTimeout(timeout)
     }
   }, [mapRef.current, showNearbySessions])
 
@@ -2834,194 +2761,201 @@ export default function Map() {
   return (
     <div className="flex h-screen flex-col">
       {/* Header Section */}
-      <header className="sticky top-0 z-[1000] border-b bg-background/80 py-2 shadow-sm backdrop-blur-sm">
-        <div className="container mx-auto">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-12">
-            {/* Logo and Brand */}
-            <div className="flex items-center sm:col-span-3">
-              <h1 className="bg-gradient-to-r from-blue to-purple-400 bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
-                SkateSpot
-              </h1>
-              {isUserAdmin && (
-                <div className="ml-2 flex items-center">
-                  <div className="bg-blue-50 rounded px-2 py-0.5 text-xs text-blue">Admin</div>
-                </div>
-              )}
-            </div>
+      <header className="sticky top-0 z-10 w-full border-b bg-white shadow-md backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 overflow-hidden px-2 py-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-0 sm:px-6 lg:px-8">
+          {/* Left: Logo/Brand */}
+          <div className="flex min-w-max flex-shrink-0 items-center justify-center gap-2 py-1 sm:max-w-xs sm:justify-start sm:py-0">
+            <h1
+              className="bg-gradient-to-r from-blue to-purple-400 bg-clip-text text-2xl font-extrabold tracking-tight text-transparent drop-shadow-sm sm:text-3xl"
+              aria-label="SkateSpot Home"
+            >
+              SkateSpot
+            </h1>
+            {isUserAdmin && (
+              <span className="bg-blue-100 text-blue-700 ml-2 rounded px-2 py-0.5 text-xs font-semibold shadow-sm">
+                Admin
+              </span>
+            )}
+          </div>
 
-            {/* Search and Controls */}
-            <div className="flex items-center justify-between sm:col-span-9">
-              <div className="flex flex-1 items-center gap-2">
-                {/* Refresh Button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => {
-                    toast.success('Refreshing skate spots...')
-                    fetchPoints(true)
-                  }}
-                  disabled={isLoadingPoints}
-                  title="Refresh skate spots"
-                  className="h-9 w-9"
+          {/* Center: Search (always centered on desktop) */}
+          <div className="order-3 mt-2 flex w-full min-w-0 flex-col items-center gap-2 sm:order-none sm:mt-0 sm:w-auto sm:flex-1 sm:px-6 lg:px-12">
+            <div className="flex w-full min-w-[180px] max-w-xl items-center gap-2 rounded-lg bg-white/90 px-2 py-1 shadow-sm ring-1 ring-border focus-within:ring-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  toast.success('Refreshing skate spots...')
+                  fetchPoints(true)
+                }}
+                disabled={isLoadingPoints}
+                title="Refresh skate spots"
+                className="h-9 w-9 shrink-0 border-none bg-transparent"
+                aria-label="Refresh skate spots"
+                tabIndex={0}
+              >
+                <RefreshCw className={`h-5 w-5 ${isLoadingPoints ? 'animate-spin' : ''}`} />
+              </Button>
+              <div className="relative min-w-0 flex-1">
+                <Command
+                  className="rounded-lg border-none bg-transparent shadow-none"
+                  shouldFilter={false}
                 >
-                  <RefreshCw className={`h-4 w-4 ${isLoadingPoints ? 'animate-spin' : ''}`} />
-                </Button>
-
-                {/* Search Box */}
-                <div className="relative max-w-md flex-1">
-                  <Command className="rounded-lg border shadow-sm" shouldFilter={false}>
-                    <CommandInput
-                      placeholder="Search for a skatepark by name or location..."
-                      value={searchQuery}
-                      onValueChange={setSearchQuery}
-                      className="h-9"
-                      // Remove the disabled state - never disable while searching
-                    />
-                    {searchQuery && (
-                      <div className="search-results-container absolute left-0 right-0 top-full z-[9999] mt-0.5 max-h-[300px] overflow-auto rounded-md border bg-background shadow-lg">
-                        <CommandList className="max-h-[300px] overflow-auto">
-                          {isSearching ? (
-                            <div className="flex items-center justify-center py-4">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              <span className="ml-2">Searching...</span>
-                            </div>
-                          ) : searchResults.length === 0 ? (
-                            <div className="py-4 text-center text-sm text-muted-foreground">
-                              {searchQuery.length < 3
-                                ? 'Type at least 3 characters to search'
-                                : 'No skateparks or locations found. Try a different search term.'}
-                            </div>
-                          ) : (
-                            <CommandGroup heading="Locations">
-                              {searchResults.map((result) => (
-                                <CommandItem
-                                  key={`${result.lat}-${result.lon}`}
-                                  value={result.display_name}
-                                  onSelect={() =>
-                                    handleSearchResultSelect(
-                                      result.lat,
-                                      result.lon,
-                                      result.display_name,
-                                    )
-                                  }
-                                  className="flex w-full cursor-pointer items-start gap-2 px-2 py-2 hover:bg-accent"
-                                >
-                                  <Search className="mt-1 h-4 w-4 shrink-0" />
-                                  <div className="flex-1">
-                                    <div className="font-medium">
-                                      {result.display_name.split(',')[0]}
-                                    </div>
-                                    <div className="text-sm text-muted-foreground">
-                                      {result.display_name}
-                                    </div>
+                  <CommandInput
+                    placeholder="Search for a skatepark by name or location..."
+                    value={searchQuery}
+                    onValueChange={setSearchQuery}
+                    className="h-11 w-full border-none bg-transparent px-4 text-base shadow-none ring-0 focus:outline-none"
+                    aria-label="Search for a skatepark by name or location"
+                  />
+                  {searchQuery && (
+                    <div className="search-results-container absolute left-0 right-0 top-full z-[9999] mt-0.5 max-h-[300px] overflow-auto rounded-md border bg-background shadow-lg">
+                      <CommandList className="max-h-[300px] overflow-auto">
+                        {isSearching ? (
+                          <div className="flex items-center justify-center py-4">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span className="ml-2">Searching...</span>
+                          </div>
+                        ) : searchResults.length === 0 ? (
+                          <div className="py-4 text-center text-sm text-muted-foreground">
+                            {searchQuery.length < 3
+                              ? 'Type at least 3 characters to search'
+                              : 'No skateparks or locations found. Try a different search term.'}
+                          </div>
+                        ) : (
+                          <CommandGroup heading="Locations">
+                            {searchResults.map((result) => (
+                              <CommandItem
+                                key={`${result.lat}-${result.lon}`}
+                                value={result.display_name}
+                                onSelect={() =>
+                                  handleSearchResultSelect(
+                                    result.lat,
+                                    result.lon,
+                                    result.display_name,
+                                  )
+                                }
+                                className="flex w-full cursor-pointer items-start gap-2 px-2 py-2 hover:bg-accent"
+                              >
+                                <Search className="mt-1 h-4 w-4 shrink-0" />
+                                <div className="flex-1">
+                                  <div className="font-medium">
+                                    {result.display_name.split(',')[0]}
                                   </div>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          )}
-                        </CommandList>
-                      </div>
-                    )}
-                  </Command>
-                  {isSearching && (
-                    <div className="absolute right-3 top-[10px]">
-                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                  <div className="text-sm text-muted-foreground">
+                                    {result.display_name}
+                                  </div>
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        )}
+                      </CommandList>
                     </div>
                   )}
-                </div>
-
-                {/* Loading Indicator */}
-                {isLoadingPoints && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="hidden sm:inline">Loading spots...</span>
+                </Command>
+                {isSearching && (
+                  <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                   </div>
                 )}
               </div>
-
-              {/* Admin Controls */}
-              {isUserAdmin && (
-                <div className="ml-2 flex flex-wrap items-center gap-2">
-                  <ImportSpotsButton onImportSuccess={() => fetchPoints(true)} />
-
-                  <DeleteAllSpotsDialog onDeleteSuccess={() => fetchPoints(true)} />
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (isUserAdmin) {
-                        setIsReportsDialogOpen(true)
-                        fetchAdminReports()
-                      }
-                    }}
-                    className="h-8"
-                  >
-                    <Flag className="mr-1 h-4 w-4" />
-                    <span className="hidden sm:inline">Reports</span>
-                    {adminReports.length > 0 && (
-                      <span className="bg-blue-100 ml-1 rounded-full px-1.5 py-0.5 text-xs font-semibold text-blue">
-                        {adminReports.length}
-                      </span>
-                    )}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (isUserAdmin) {
-                        setIsAdminProposalsDialogOpen(true)
-                        fetchAdminProposals()
-                      }
-                    }}
-                    className="h-8"
-                  >
-                    <FileEdit className="mr-1 h-4 w-4" />
-                    <span className="hidden sm:inline">Proposals</span>
-                    {adminProposals.length > 0 && (
-                      <span className="bg-blue-100 ml-1 rounded-full px-1.5 py-0.5 text-xs font-semibold text-blue">
-                        {adminProposals.length}
-                      </span>
-                    )}
-                  </Button>
-                </div>
-              )}
             </div>
           </div>
 
-          {/* Welcome Message */}
-          {showWelcomeMessage && (
-            <div className="bg-blue-50 mt-4 rounded-lg p-3 text-sm text-blue">
-              <div className="flex items-start justify-between">
-                <p>
-                  Welcome to SkateSpot! Find, add, and share your favorite skate spots. Click
-                  anywhere on the map to add a new spot, or use the search to find existing
-                  locations.
-                </p>
-                <button
-                  onClick={handleDismissWelcome}
-                  className="text-blue-400 hover:text-blue-600 ml-2"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Error Message */}
-          {hasApiError && (
-            <div className="mt-2 bg-destructive/10 p-3 text-center">
-              <p className="mb-2 text-destructive">Failed to load skate spots</p>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setHasApiError(false)
-                  fetchPoints(true)
-                  toast.success('Retrying to load skate spots...')
-                }}
-              >
-                Retry
-              </Button>
+          {/* Right: Admin Controls as Dropdown */}
+          {isUserAdmin && (
+            <div className="order-2 flex min-w-max flex-shrink-0 items-center justify-center gap-2 sm:order-none sm:max-w-sm sm:justify-end sm:gap-3">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 px-3" aria-label="Admin Menu">
+                    <Settings className="mr-1 h-4 w-4" />
+                    <span className="hidden sm:inline">Admin Menu</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-56 p-2">
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="justify-start"
+                      onClick={() => {
+                        // Import Spots
+                        if (typeof window !== 'undefined') {
+                          document
+                            .querySelector('[data-import-spots]')
+                            ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+                        }
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <RefreshCw className="h-4 w-4" /> Import Spots
+                      </span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="justify-start text-red-600"
+                      onClick={() => {
+                        // Delete All Spots
+                        if (typeof window !== 'undefined') {
+                          document
+                            .querySelector('[data-delete-all-spots]')
+                            ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+                        }
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Trash className="h-4 w-4" /> Delete All Spots
+                      </span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="justify-start"
+                      onClick={() => {
+                        setIsReportsDialogOpen(true)
+                        fetchAdminReports()
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Flag className="h-4 w-4" /> Reports
+                        {adminReports.length > 0 && (
+                          <span className="bg-blue-100 ml-1 rounded-full px-1.5 py-0.5 text-xs font-semibold text-blue">
+                            {adminReports.length}
+                          </span>
+                        )}
+                      </span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="justify-start"
+                      onClick={() => {
+                        setIsAdminProposalsDialogOpen(true)
+                        fetchAdminProposals()
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <FileEdit className="h-4 w-4" /> Proposals
+                        {adminProposals.length > 0 && (
+                          <span className="bg-blue-100 ml-1 rounded-full px-1.5 py-0.5 text-xs font-semibold text-blue">
+                            {adminProposals.length}
+                          </span>
+                        )}
+                      </span>
+                    </Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+              {/* Hidden triggers for ImportSpotsButton and DeleteAllSpotsDialog */}
+              <span className="hidden">
+                <ImportSpotsButton data-import-spots onImportSuccess={() => fetchPoints(true)} />
+                <DeleteAllSpotsDialog
+                  data-delete-all-spots
+                  onDeleteSuccess={() => fetchPoints(true)}
+                />
+              </span>
             </div>
           )}
         </div>
@@ -3063,10 +2997,14 @@ export default function Map() {
                 showNearbySessions ? 'border border-blue' : 'border border-transparent'
               }`}
               onClick={() => {
-                setShowNearbySessions(!showNearbySessions)
-                if (!showNearbySessions) {
+                const newShowState = !showNearbySessions
+                setShowNearbySessions(newShowState)
+                if (newShowState) {
                   fetchNearbySessions()
                   setIsNearbySessionsDialogOpen(true)
+                } else {
+                  setNearbySessions([])
+                  setIsNearbySessionsDialogOpen(false)
                 }
               }}
             >
@@ -3110,9 +3048,6 @@ export default function Map() {
                 </div>
               ) : (
                 nearbySessions.map((session) => {
-                  const point = points.find((p) => p.id === session.spotId)
-                  if (!point) return null
-                  // Add check for valid coordinates
                   if (
                     !session.coordinates ||
                     !Array.isArray(session.coordinates) ||
@@ -3120,9 +3055,11 @@ export default function Map() {
                     typeof session.coordinates[0] !== 'number' ||
                     typeof session.coordinates[1] !== 'number'
                   ) {
-                    console.warn('Invalid coordinates for session:', session.id)
+                    console.warn('Skipping session with invalid coordinates:', session)
                     return null
                   }
+                  const point = points.find((p) => p.id === session.spotId)
+                  if (!point) return null
                   return (
                     <Marker
                       key={session.id}
@@ -3323,10 +3260,18 @@ export default function Map() {
                               ) : (
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2">
-                                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200">
-                                      <span className="text-sm font-medium text-gray-600">
-                                        {comment.createdByName.charAt(0).toUpperCase()}
-                                      </span>
+                                    <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-gray-200">
+                                      {comment.imageUrl ? (
+                                        <img
+                                          src={comment.imageUrl}
+                                          alt={comment.createdByName}
+                                          className="h-full w-full object-cover"
+                                        />
+                                      ) : (
+                                        <span className="text-sm font-medium text-gray-600">
+                                          {comment.createdByName.charAt(0).toUpperCase()}
+                                        </span>
+                                      )}
                                     </div>
                                     <div>
                                       <p className="font-medium text-gray-900">
@@ -3422,12 +3367,9 @@ export default function Map() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="description">Description (Optional)</Label>
-              <Textarea
-                id="description"
+              <DescriptionInput
                 value={newPointDescription}
-                onChange={(e) => handleDescriptionChange(e.target.value)}
-                placeholder="Enter a description of this spot"
-                className="min-h-[80px]"
+                onChange={handleDescriptionChange}
                 disabled={isAddingPoint}
               />
             </div>
@@ -3476,72 +3418,85 @@ export default function Map() {
 
       {/* Reports Dialog */}
       <Dialog open={isReportsDialogOpen} onOpenChange={setIsReportsDialogOpen}>
-        <DialogContent className="z-[9999] max-h-[52vh] w-[90vw] md:max-h-[80vh] md:max-w-[800px]">
-          <DialogHeader>
-            <DialogTitle>Manage Reports</DialogTitle>
+        <DialogContent className="z-[9999] max-h-[80vh] w-[95vw] p-0 md:max-w-[700px]">
+          <DialogHeader className="px-6 pb-2 pt-6">
+            <DialogTitle className="flex items-center gap-2 text-2xl font-bold">
+              <Flag className="h-6 w-6 text-red-500" />
+              Manage Spot Reports
+            </DialogTitle>
+            <DialogDescription className="mt-1 text-base text-muted-foreground">
+              Review and take action on reported skate spots.
+            </DialogDescription>
           </DialogHeader>
-          <div className="mt-4">
+          <div className="px-6 pb-6">
             {isLoadingAdminReports ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900"></div>
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-red-500" />
+                <span className="ml-3 text-lg text-muted-foreground">Loading reports...</span>
               </div>
             ) : adminReports.length === 0 ? (
-              <p className="text-center text-gray-500">No reports to manage</p>
+              <div className="flex flex-col items-center justify-center py-12">
+                <Flag className="mb-2 h-10 w-10 text-muted-foreground" />
+                <p className="text-lg text-muted-foreground">No reports to review 🎉</p>
+                <p className="mt-1 text-sm text-muted-foreground">All clear for now!</p>
+              </div>
             ) : (
-              <ScrollArea className="h-[60vh] pr-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">
-                    {adminReports.length} reports pending review
-                  </div>
-                  {/* {isUserAdmin && (
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleDenyAllReports}
-                        disabled={isDenyingAll || adminReports.length === 0}
-                      >
-                        {isDenyingAll ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Denying All...
-                          </>
-                        ) : (
-                          <>
-                            <X className="mr-2 h-4 w-4" />
-                            Deny All Reports
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  )} */}
-                </div>
-                {adminReports.map((adminReport) => (
-                  <div key={adminReport.id} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">{adminReport.spotName}</p>
-                        <p className="text-sm text-gray-500">{adminReport.reason}</p>
-                      </div>
-                      <div className="flex gap-2">
+              <ScrollArea className="h-[60vh] pr-2">
+                <div className="space-y-4">
+                  {adminReports.map((adminReport) => (
+                    <Card
+                      key={adminReport.id}
+                      className="border border-red-200/60 shadow-sm transition-shadow hover:shadow-lg"
+                    >
+                      <CardHeader className="flex flex-row items-center gap-3 rounded-t-md bg-red-50/60 p-4">
+                        <Flag className="h-5 w-5 text-red-400" />
+                        <div className="flex-1">
+                          <CardTitle className="text-lg font-semibold text-red-700">
+                            {adminReport.spotName}
+                          </CardTitle>
+                          <CardDescription className="mt-1 text-sm text-red-600">
+                            {adminReport.reason}
+                          </CardDescription>
+                        </div>
+                        <span className="inline-block rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-600">
+                          Pending
+                        </span>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+                          <span>
+                            <span className="font-medium text-gray-700">Reported by:</span>{' '}
+                            {adminReport.userEmail || 'Unknown'}
+                          </span>
+                          <span>
+                            <span className="font-medium text-gray-700">Reported:</span>{' '}
+                            {adminReport.createdAt
+                              ? new Date(adminReport.createdAt).toLocaleString()
+                              : 'Unknown'}
+                          </span>
+                        </div>
+                      </CardContent>
+                      <CardFooter className="flex justify-end gap-2 rounded-b-md bg-gray-50 p-4">
                         <Button
-                          variant="outline"
+                          variant="destructive"
                           size="sm"
+                          className="font-semibold"
                           onClick={() => handleUpdateReportStatus(adminReport.id, 'accept')}
                         >
-                          Accept
+                          <Trash className="mr-1 h-4 w-4" /> Remove Spot
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
+                          className="border-gray-300 font-semibold"
                           onClick={() => handleUpdateReportStatus(adminReport.id, 'deny')}
                         >
-                          Deny
+                          Dismiss
                         </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                      </CardFooter>
+                    </Card>
+                  ))}
+                </div>
               </ScrollArea>
             )}
           </div>
@@ -3587,86 +3542,114 @@ export default function Map() {
 
       {/* Admin Proposals Dialog */}
       <Dialog open={isAdminProposalsDialogOpen} onOpenChange={setIsAdminProposalsDialogOpen}>
-        <DialogContent className="max-h-[80vh] w-[90vw] sm:max-w-[800px]">
-          <DialogHeader>
-            <DialogTitle>Review Edit Proposals</DialogTitle>
+        <DialogContent className="max-h-[80vh] w-[95vw] overflow-x-auto p-0 md:max-w-[700px]">
+          <DialogHeader className="px-6 pb-2 pt-6">
+            <DialogTitle className="flex items-center gap-2 text-2xl font-bold">
+              <FileEdit className="text-blue-500 h-6 w-6" />
+              Review Edit Proposals
+            </DialogTitle>
+            <DialogDescription className="mt-1 text-base text-muted-foreground">
+              Review and take action on proposed spot edits.
+            </DialogDescription>
           </DialogHeader>
-          <div className="mt-4">
+          <div className="px-6 pb-6">
             {isLoadingAdminProposals ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900"></div>
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="text-blue-500 h-8 w-8 animate-spin" />
+                <span className="ml-3 text-lg text-muted-foreground">Loading proposals...</span>
               </div>
             ) : adminProposals.length === 0 ? (
-              <p className="text-center text-gray-500">No proposals to review</p>
+              <div className="flex flex-col items-center justify-center py-12">
+                <FileEdit className="mb-2 h-10 w-10 text-muted-foreground" />
+                <p className="text-lg text-muted-foreground">No proposals to review 🎉</p>
+                <p className="mt-1 text-sm text-muted-foreground">All clear for now!</p>
+              </div>
             ) : (
-              <ScrollArea className="h-[60vh] pr-4">
-                {adminProposals.map((proposal) => (
-                  <Card key={proposal.id} className="mb-4">
-                    <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle className="text-lg">{proposal.spotName}</CardTitle>
-                          <p className="text-sm text-gray-500">
-                            Proposed by {proposal.userEmail}{' '}
-                            {formatDistanceToNow(proposal.createdAt, { addSuffix: true })}
-                          </p>
+              <ScrollArea className="h-[60vh] overflow-x-auto pr-2">
+                <div className="space-y-4">
+                  {adminProposals.map((proposal) => (
+                    <Card
+                      key={proposal.id}
+                      className="border-blue-200/60 mb-4 w-full max-w-full overflow-x-auto break-words border shadow-sm transition-shadow hover:shadow-lg"
+                    >
+                      <CardHeader className="bg-blue-50/60 flex flex-row items-center gap-3 rounded-t-md p-4">
+                        <FileEdit className="text-blue-400 h-5 w-5" />
+                        <div className="flex-1">
+                          <CardTitle className="text-blue-700 w-full max-w-full break-words text-lg font-semibold">
+                            {proposal.spotName}
+                          </CardTitle>
+                          <CardDescription className="text-blue-600 mt-1 w-full max-w-full break-words text-sm">
+                            Proposed by {proposal.userEmail || 'Unknown'}
+                          </CardDescription>
                         </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              handleUpdateProposal(proposal.spotId, proposal.id, 'approved')
-                            }
-                            disabled={isUpdatingProposal[proposal.id]}
-                          >
-                            {isUpdatingProposal[proposal.id] ? 'Approving...' : 'Approve'}
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() =>
-                              handleUpdateProposal(proposal.spotId, proposal.id, 'rejected')
-                            }
-                            disabled={isUpdatingProposal[proposal.id]}
-                          >
-                            {isUpdatingProposal[proposal.id] ? 'Rejecting...' : 'Reject'}
-                          </Button>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        <div>
-                          <h4 className="font-medium">Current Details</h4>
-                          <p className="text-sm text-gray-600">
-                            Name: {proposal.currentName}
-                            <br />
-                            Type: {proposal.currentType}
-                          </p>
-                        </div>
-                        <div>
-                          <h4 className="font-medium">Proposed Changes</h4>
-                          <p className="text-sm text-gray-600">
-                            Name: {proposal.proposedName}
-                            <br />
-                            Type: {proposal.proposedType}
-                          </p>
-                        </div>
-                        <div>
-                          <h4 className="font-medium">Reason</h4>
-                          <p className="text-sm text-gray-600">{proposal.reason}</p>
-                        </div>
-                        {proposal.adminNotes && (
+                        <span className="bg-blue-100 text-blue-600 inline-block rounded-full px-3 py-1 text-xs font-semibold">
+                          {proposal.status.charAt(0).toUpperCase() + proposal.status.slice(1)}
+                        </span>
+                      </CardHeader>
+                      <CardContent className="p-4">
+                        <div className="w-full max-w-full space-y-4">
                           <div>
-                            <h4 className="font-medium">Admin Notes</h4>
-                            <p className="text-sm text-gray-600">{proposal.adminNotes}</p>
+                            <h4 className="font-medium">Current Details</h4>
+                            <p className="w-full max-w-full break-words text-sm text-gray-600">
+                              Name: {proposal.currentName}
+                              <br />
+                              Type: {proposal.currentType}
+                            </p>
                           </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                          <div>
+                            <h4 className="font-medium">Proposed Changes</h4>
+                            <p className="w-full max-w-full break-words text-sm text-gray-600">
+                              Name: {proposal.proposedName}
+                              <br />
+                              Type: {proposal.proposedType}
+                            </p>
+                          </div>
+                          <div>
+                            <h4 className="font-medium">Reason</h4>
+                            <p
+                              className="w-full max-w-full whitespace-pre-line break-words text-sm text-gray-600"
+                              style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+                            >
+                              {proposal.reason}
+                            </p>
+                          </div>
+                          {proposal.adminNotes && (
+                            <div>
+                              <h4 className="font-medium">Admin Notes</h4>
+                              <p className="w-full max-w-full break-words text-sm text-gray-600">
+                                {proposal.adminNotes}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                      <CardFooter className="flex justify-end gap-2 rounded-b-md bg-gray-50 p-4">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-gray-300 font-semibold"
+                          onClick={() =>
+                            handleUpdateProposal(proposal.spotId, proposal.id, 'approved')
+                          }
+                          disabled={isUpdatingProposal[proposal.id]}
+                        >
+                          {isUpdatingProposal[proposal.id] ? 'Approving...' : 'Approve'}
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="font-semibold"
+                          onClick={() =>
+                            handleUpdateProposal(proposal.spotId, proposal.id, 'rejected')
+                          }
+                          disabled={isUpdatingProposal[proposal.id]}
+                        >
+                          {isUpdatingProposal[proposal.id] ? 'Rejecting...' : 'Reject'}
+                        </Button>
+                      </CardFooter>
+                    </Card>
+                  ))}
+                </div>
               </ScrollArea>
             )}
           </div>
@@ -3742,38 +3725,94 @@ export default function Map() {
                 nearbySessions.map((session) => (
                   <Card key={session.id} className="mb-4">
                     <CardHeader>
-                      <CardTitle className="text-lg">{session.title}</CardTitle>
-                      <CardDescription>
-                        {session.spotName} • Created by {session.createdByName}
-                      </CardDescription>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="text-lg">{session.title}</CardTitle>
+                          <CardDescription>
+                            {session.spotName} • Created by {session.createdByName}
+                          </CardDescription>
+                        </div>
+                        {user && session.createdBy === user.id && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSelectedSpotForMeetup({
+                                    id: session.spotId,
+                                    name: session.spotName,
+                                  })
+                                  setIsMeetupsListDialogOpen(true)
+                                  getMeetups(session.spotId).then(setMeetups)
+                                }}
+                              >
+                                <Edit2 className="mr-2 h-4 w-4" />
+                                Edit Session
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-red-600"
+                                onClick={async () => {
+                                  try {
+                                    await deleteMeetup(session.id)
+                                    toast.success('Session deleted successfully')
+                                    fetchNearbySessions()
+                                  } catch (error) {
+                                    console.error('Error deleting session:', error)
+                                    toast.error('Failed to delete session')
+                                  }
+                                }}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete Session
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
                     </CardHeader>
                     <CardContent>
                       <p className="text-sm text-muted-foreground">{session.description}</p>
                       <div className="mt-2 flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">
-                          {formatDistanceToNow(session.date, { addSuffix: true })}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {(session.distance * 0.621371).toFixed(1)} miles away
-                        </span>
+                        <div className="space-y-1">
+                          <div className="text-muted-foreground">
+                            Started {formatDistanceToNow(session.date, { addSuffix: true })}
+                          </div>
+                          <div className="text-muted-foreground">
+                            {(session.distance * 0.621371).toFixed(1)} miles away
+                          </div>
+                        </div>
+                        {user && (
+                          <Button
+                            variant={
+                              session.participants?.includes(user.id) ? 'outline' : 'default'
+                            }
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                if (session.participants?.includes(user.id)) {
+                                  await leaveMeetup(session.id)
+                                  toast.success('Left session successfully')
+                                } else {
+                                  await joinMeetup(session.id)
+                                  toast.success('Joined session successfully')
+                                }
+                                // Refresh nearby sessions
+                                fetchNearbySessions()
+                              } catch (error) {
+                                console.error('Error joining/leaving session:', error)
+                                toast.error('Failed to join/leave session')
+                              }
+                            }}
+                          >
+                            {session.participants?.includes(user.id) ? 'Leave' : 'Join'}
+                          </Button>
+                        )}
                       </div>
                     </CardContent>
-                    <CardFooter>
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        onClick={() => {
-                          setSelectedSpotForMeetup({
-                            id: session.spotId,
-                            name: session.spotName,
-                          })
-                          setIsMeetupsListDialogOpen(true)
-                          getMeetups(session.spotId).then(setMeetups)
-                        }}
-                      >
-                        View Details
-                      </Button>
-                    </CardFooter>
                   </Card>
                 ))
               )}
@@ -3823,87 +3862,6 @@ export default function Map() {
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </ScrollArea>
-                )}
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          <Dialog open={isAdminProposalsDialogOpen} onOpenChange={setIsAdminProposalsDialogOpen}>
-            <DialogContent className="max-h-[80vh] w-[90vw] sm:max-w-[800px]">
-              <DialogHeader>
-                <DialogTitle>Review Edit Proposals</DialogTitle>
-              </DialogHeader>
-              <div className="mt-4">
-                {isLoadingAdminProposals ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                  </div>
-                ) : adminProposals.length === 0 ? (
-                  <p className="text-center text-gray-500">No proposals to review</p>
-                ) : (
-                  <ScrollArea className="h-[60vh] pr-4">
-                    {adminProposals.map((proposal) => (
-                      <Card key={proposal.id} className="mb-4">
-                        <CardHeader>
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <CardTitle className="text-lg">{proposal.spotName}</CardTitle>
-                              <p className="text-sm text-gray-500">
-                                Proposed by {proposal.userEmail}{' '}
-                                {formatDistanceToNow(proposal.createdAt, { addSuffix: true })}
-                              </p>
-                            </div>
-                            <div className="flex gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleUpdateProposal(proposal.spotId, proposal.id, 'approved')
-                                }
-                                disabled={isUpdatingProposal[proposal.id]}
-                              >
-                                {isUpdatingProposal[proposal.id] ? 'Approving...' : 'Approve'}
-                              </Button>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() =>
-                                  handleUpdateProposal(proposal.spotId, proposal.id, 'rejected')
-                                }
-                                disabled={isUpdatingProposal[proposal.id]}
-                              >
-                                {isUpdatingProposal[proposal.id] ? 'Rejecting...' : 'Reject'}
-                              </Button>
-                            </div>
-                          </div>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-4">
-                            <div>
-                              <h4 className="font-medium">Current Details</h4>
-                              <p className="text-sm text-gray-600">
-                                Name: {proposal.currentName}
-                                <br />
-                                Type: {proposal.currentType}
-                              </p>
-                            </div>
-                            <div>
-                              <h4 className="font-medium">Proposed Changes</h4>
-                              <p className="text-sm text-gray-600">
-                                Name: {proposal.proposedName}
-                                <br />
-                                Type: {proposal.proposedType}
-                              </p>
-                            </div>
-                            <div>
-                              <h4 className="font-medium">Reason</h4>
-                              <p className="text-sm text-gray-600">{proposal.reason}</p>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
                     ))}
                   </ScrollArea>
                 )}

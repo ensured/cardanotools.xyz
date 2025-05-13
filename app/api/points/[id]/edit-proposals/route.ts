@@ -18,65 +18,58 @@ interface EditProposal {
   adminNotes?: string
 }
 
-interface Point {
+interface MapPoint {
   id: string
   name: string
   type: 'street' | 'park' | 'diy'
   coordinates: [number, number]
   createdBy: string
-  description?: string
-  lastUpdated: number
+  lastUpdated?: number
   editProposals?: EditProposal[]
 }
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+const POINTS_KEY = 'points:all'
+
+export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params
-
-    const point = await kv.get<Point>(`point:${id}`)
+    const params = await context.params
+    const pointId = params.id
+    const points: MapPoint[] = (await kv.get(POINTS_KEY)) || []
+    const point = points.find((p) => p.id === pointId)
     if (!point) {
-      return NextResponse.json({ error: 'Point not found' }, { status: 404 })
+      return new NextResponse('Spot not found', { status: 404 })
     }
-
-    // Get all edit proposals for this point
-    return NextResponse.json(point.editProposals || [])
+    const editProposals = point.editProposals || []
+    editProposals.sort((a, b) => b.createdAt - a.createdAt)
+    return NextResponse.json(editProposals)
   } catch (error) {
-    console.error('Error fetching edit proposals:', error)
-    return NextResponse.json({ error: 'Failed to fetch edit proposals' }, { status: 500 })
+    console.error('[EDIT_PROPOSALS_GET]', error)
+    return new NextResponse('Internal Error', { status: 500 })
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
+    const params = await context.params
+    const pointId = params.id
     if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return new NextResponse('Unauthorized', { status: 401 })
     }
-
     const user = await currentUser()
-    if (!user?.emailAddresses?.length) {
-      return NextResponse.json({ error: 'No email address found for user' }, { status: 401 })
+    const userEmail = user?.emailAddresses[0]?.emailAddress
+    if (!userEmail) {
+      return new NextResponse('User email not found', { status: 400 })
     }
-
-    const { id } = await params
     const { proposedName, proposedType, proposedDescription, reason } = await request.json()
-
     if (!proposedName || !proposedType || !reason) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+      return new NextResponse('Missing required fields', { status: 400 })
     }
-
-    // Get the point data
-    const point = await kv.get<Point>(`point:${id}`)
-    if (!point) {
-      return NextResponse.json({ error: 'Point not found' }, { status: 404 })
-    }
-
-    // Create the proposal
     const proposal: EditProposal = {
       id: uuidv7(),
-      spotId: id,
+      spotId: pointId,
       userId,
-      userEmail: user.emailAddresses[0].emailAddress,
+      userEmail,
       proposedName,
       proposedType,
       proposedDescription,
@@ -84,75 +77,78 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       createdAt: Date.now(),
       status: 'pending',
     }
-
-    // Update the point with the new proposal
-    const editProposals = [...(point.editProposals || []), proposal]
-
-    await kv.set(`point:${id}`, {
+    const points: MapPoint[] = (await kv.get(POINTS_KEY)) || []
+    const pointIndex = points.findIndex((p) => p.id === pointId)
+    if (pointIndex === -1) {
+      return new NextResponse('Spot not found', { status: 404 })
+    }
+    const point = points[pointIndex]
+    const editProposals = point.editProposals || []
+    points[pointIndex] = {
       ...point,
-      editProposals,
-    })
-
+      editProposals: [...editProposals, proposal],
+      lastUpdated: Date.now(),
+    }
+    await kv.set(POINTS_KEY, points)
     return NextResponse.json(proposal)
   } catch (error) {
-    console.error('Error creating edit proposal:', error)
-    return NextResponse.json({ error: 'Failed to create edit proposal' }, { status: 500 })
+    console.error('[EDIT_PROPOSALS_POST]', error)
+    return new NextResponse('Internal Error', { status: 500 })
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
-    const adminCheck = await isAdmin()
-    if (!adminCheck) {
-      return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 403 })
-    }
-
-    const { id } = await params
+    const { userId } = await auth()
+    const params = await context.params
+    const pointId = params.id
     const { proposalId, status, adminNotes } = await request.json()
-
-    if (!proposalId || !['approved', 'rejected'].includes(status)) {
-      return NextResponse.json({ error: 'Invalid request data' }, { status: 400 })
+    if (!userId) {
+      return new NextResponse('Unauthorized', { status: 401 })
     }
-
-    // Get the point data
-    const point = await kv.get<Point>(`point:${id}`)
-    if (!point) {
-      return NextResponse.json({ error: 'Point not found' }, { status: 404 })
+    if (!proposalId || typeof proposalId !== 'string') {
+      return new NextResponse('Invalid proposal ID', { status: 400 })
     }
-
-    // Find the proposal
-    const proposal = point.editProposals?.find((p) => p.id === proposalId)
-    if (!proposal) {
-      return NextResponse.json({ error: 'Proposal not found' }, { status: 404 })
+    if (!status || !['approved', 'rejected', 'pending'].includes(status)) {
+      return new NextResponse('Invalid status', { status: 400 })
     }
-
-    // Update the proposal status
-    const updatedProposals =
-      point.editProposals?.map((p) =>
-        p.id === proposalId ? { ...p, status, adminNotes: adminNotes || p.adminNotes } : p,
-      ) || []
-
-    // If approved, update the point with the proposed changes
-    if (status === 'approved') {
-      await kv.set(`point:${id}`, {
-        ...point,
-        name: proposal.proposedName,
-        type: proposal.proposedType,
-        description: proposal.proposedDescription,
-        lastUpdated: Date.now(),
-        editProposals: updatedProposals,
-      })
-    } else {
-      // Just update the proposals if rejected
-      await kv.set(`point:${id}`, {
-        ...point,
-        editProposals: updatedProposals,
-      })
+    const user = await currentUser()
+    const userEmail = user?.emailAddresses[0]?.emailAddress
+    if (!userEmail) {
+      return new NextResponse('User email not found', { status: 400 })
     }
-
-    return NextResponse.json({ success: true, status })
+    // Check if user is admin
+    const isUserAdmin = await isAdmin()
+    if (!isUserAdmin) {
+      return new NextResponse('Unauthorized', { status: 403 })
+    }
+    const points: MapPoint[] = (await kv.get(POINTS_KEY)) || []
+    const pointIndex = points.findIndex((p) => p.id === pointId)
+    if (pointIndex === -1) {
+      return new NextResponse('Spot not found', { status: 404 })
+    }
+    const point = points[pointIndex]
+    const editProposals = point.editProposals || []
+    const proposalIndex = editProposals.findIndex((p) => p.id === proposalId)
+    if (proposalIndex === -1) {
+      return new NextResponse('Proposal not found', { status: 404 })
+    }
+    const updatedProposal: EditProposal = {
+      ...editProposals[proposalIndex],
+      status,
+      adminNotes,
+    }
+    const updatedProposals = [...editProposals]
+    updatedProposals[proposalIndex] = updatedProposal
+    points[pointIndex] = {
+      ...point,
+      editProposals: updatedProposals,
+      lastUpdated: Date.now(),
+    }
+    await kv.set(POINTS_KEY, points)
+    return NextResponse.json(updatedProposal)
   } catch (error) {
-    console.error('Error updating edit proposal:', error)
-    return NextResponse.json({ error: 'Failed to update edit proposal' }, { status: 500 })
+    console.error('[EDIT_PROPOSALS_PATCH]', error)
+    return new NextResponse('Internal Error', { status: 500 })
   }
 }

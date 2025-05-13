@@ -15,22 +15,23 @@ interface MapPoint {
   coordinates: [number, number]
   createdBy: string
   lastUpdated?: number
+  likes?: LikeStatus[]
 }
+
+const POINTS_KEY = 'points:all'
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const params = await context.params
     const pointId = params.id
 
-    // Get the point to verify it exists
-    const point = await kv.get<MapPoint>(`point:${pointId}`)
+    // Get all points
+    const points: MapPoint[] = (await kv.get(POINTS_KEY)) || []
+    const point = points.find((p) => p.id === pointId)
     if (!point) {
       return new NextResponse('Spot not found', { status: 404 })
     }
-
-    // Get likes from a separate collection instead of from the point object
-    const likes = (await kv.get<LikeStatus[]>(`point:${pointId}:likes`)) || []
-
+    const likes = point.likes || []
     return NextResponse.json(likes)
   } catch (error) {
     console.error('[LIKES_GET]', error)
@@ -60,54 +61,38 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     }
 
     const { status } = await request.json()
-
     if (status !== 'like' && status !== 'dislike' && status !== null) {
       return new NextResponse('Invalid status', { status: 400 })
     }
 
-    // Get the point to verify it exists
-    const point = await kv.get<MapPoint>(`point:${pointId}`)
-    if (!point) {
+    // Get all points
+    const points: MapPoint[] = (await kv.get(POINTS_KEY)) || []
+    const pointIndex = points.findIndex((p) => p.id === pointId)
+    if (pointIndex === -1) {
       return new NextResponse('Spot not found', { status: 404 })
     }
-
-    // Get existing likes from separate collection
-    const likes = (await kv.get<LikeStatus[]>(`point:${pointId}:likes`)) || []
+    const point = points[pointIndex]
+    const likes = point.likes || []
     const userLikeIndex = likes.findIndex((like) => like.email === userEmail)
-
     let updatedLikes: LikeStatus[] = [...likes]
-
     if (userLikeIndex === -1) {
-      // Add new like
       if (status !== null) {
         updatedLikes.push({ email: userEmail, name: userName, status })
       }
     } else {
-      // Update existing like
       if (status === null) {
-        // Remove like if status is null
         updatedLikes.splice(userLikeIndex, 1)
       } else {
-        // Update like status
         updatedLikes[userLikeIndex].status = status
       }
     }
-
-    // Use pipeline for atomic operations
-    const pipeline = kv.pipeline()
-
-    // Store likes in a separate key
-    pipeline.set(`point:${pointId}:likes`, updatedLikes)
-
-    // Update the point's last updated timestamp
-    pipeline.set(`point:${pointId}`, {
+    // Update the point's likes and lastUpdated
+    points[pointIndex] = {
       ...point,
+      likes: updatedLikes,
       lastUpdated: Date.now(),
-    })
-
-    // Execute all operations atomically
-    await pipeline.exec()
-
+    }
+    await kv.set(POINTS_KEY, points)
     return NextResponse.json(updatedLikes)
   } catch (error) {
     console.error('[LIKES_POST]', error)

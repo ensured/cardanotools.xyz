@@ -64,11 +64,7 @@ export function ImportSpotsDialog({ onImportSuccess }: ImportSpotsDialogProps) {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={handleImport}
-            disabled={isImporting}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
+          <AlertDialogAction onClick={handleImport} disabled={isImporting}>
             {isImporting ? 'Importing...' : 'Import Spots'}
           </AlertDialogAction>
         </AlertDialogFooter>

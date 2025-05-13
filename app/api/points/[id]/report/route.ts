@@ -10,6 +10,7 @@ interface MapPoint {
   coordinates: [number, number]
   createdBy: string
   lastUpdated?: number
+  activeReports?: Report[]
 }
 
 interface Report {
@@ -23,44 +24,37 @@ interface Report {
   userEmail?: string
 }
 
+const POINTS_KEY = 'points:all'
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { userId } = await auth()
     const params = await context.params
     const spotId = params.id
-
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
-
     const { reason } = await request.json()
-
     if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
       return new NextResponse('Invalid reason', { status: 400 })
     }
-
-    // Check if the spot exists
-    const spot = await kv.get<MapPoint>(`point:${spotId}`)
-    if (!spot) {
+    // Get all points
+    const points: MapPoint[] = (await kv.get(POINTS_KEY)) || []
+    const pointIndex = points.findIndex((p) => p.id === spotId)
+    if (pointIndex === -1) {
       return new NextResponse('Spot not found', { status: 404 })
     }
-
-    // Get existing reports for this spot
-    const reports = (await kv.get<Report[]>(`point:${spotId}:reports`)) || []
-
+    const point = points[pointIndex]
+    const activeReports = point.activeReports || []
     // Check if user has already reported this spot
-    const hasExistingReport = reports.some((report) => report.userId === userId)
-
+    const hasExistingReport = activeReports.some((report) => report.userId === userId)
     if (hasExistingReport) {
       return new NextResponse('You have already reported this spot', { status: 400 })
     }
-
     // Get user email for admin display
     const user = await currentUser()
     const userEmail = user?.emailAddresses[0]?.emailAddress || 'unknown'
-
     const reportId = uuidv7()
-
     const newReport: Report = {
       id: reportId,
       userId,
@@ -68,23 +62,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       createdAt: Date.now(),
       status: 'pending',
       spotId,
-      spotName: spot.name,
+      spotName: point.name,
       userEmail,
     }
-
-    // Add new report to reports collection for this spot
-    const updatedReports = [...reports, newReport]
-    await kv.set(`point:${spotId}:reports`, updatedReports)
-
-    // Store the report in the new format - individual report with report: prefix
-    await kv.set(`report:${reportId}`, newReport)
-
-    // Update the point's last updated timestamp
-    await kv.set(`point:${spotId}`, {
-      ...spot,
+    // Add new report to activeReports array
+    const updatedActiveReports = [...activeReports, newReport]
+    points[pointIndex] = {
+      ...point,
+      activeReports: updatedActiveReports,
       lastUpdated: Date.now(),
-    })
-
+    }
+    await kv.set(POINTS_KEY, points)
     return NextResponse.json(newReport)
   } catch (error) {
     console.error('Error creating report:', error)
@@ -96,17 +84,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const params = await context.params
     const spotId = params.id
-
-    // Check if the spot exists
-    const spot = await kv.get<MapPoint>(`point:${spotId}`)
-    if (!spot) {
+    // Get all points
+    const points: MapPoint[] = (await kv.get(POINTS_KEY)) || []
+    const point = points.find((p) => p.id === spotId)
+    if (!point) {
       return new NextResponse('Spot not found', { status: 404 })
     }
-
-    // Get all reports for this spot
-    const reports = (await kv.get<Report[]>(`point:${spotId}:reports`)) || []
-
-    return NextResponse.json(reports)
+    const activeReports = point.activeReports || []
+    return NextResponse.json(activeReports)
   } catch (error) {
     console.error('Error fetching reports:', error)
     return new NextResponse('Internal Server Error', { status: 500 })

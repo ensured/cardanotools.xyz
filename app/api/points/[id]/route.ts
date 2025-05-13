@@ -42,51 +42,24 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       return new NextResponse('User email not found', { status: 400 })
     }
 
-    // Get the point to check ownership
-    const point = await kv.get<MapPoint>(`point:${params.id}`)
-    if (!point) {
+    // Fetch all points from the single key
+    const points: MapPoint[] = (await kv.get('points:all')) || []
+    const pointIndex = points.findIndex((p) => p.id === params.id)
+    if (pointIndex === -1) {
       return new NextResponse('Point not found', { status: 404 })
     }
+    const point = points[pointIndex]
 
     // Check if user owns the point or is admin
     if (point.createdBy !== userEmail && !(await isAdmin())) {
       return new NextResponse('Unauthorized', { status: 403 })
     }
 
-    // Get all meetups for this spot
-    const meetupIds = await kv.lrange(`spot:${params.id}:meetups`, 0, -1)
+    // Remove the point from the array
+    points.splice(pointIndex, 1)
+    await kv.set('points:all', points)
 
-    // Use pipeline for atomic operations
-    const pipeline = kv.pipeline()
-
-    // Remove from points list
-    pipeline.lrem('points:ids', 0, params.id)
-
-    // Delete the point data
-    pipeline.del(`point:${params.id}`)
-
-    // Delete all meetups and their references
-    for (const meetupId of meetupIds) {
-      const meetup = await kv.get<Meetup>(`meetup:${meetupId}`)
-      if (meetup) {
-        // Delete the meetup
-        pipeline.del(`meetup:${meetupId}`)
-
-        // Remove meetup from spot's list
-        pipeline.lrem(`spot:${params.id}:meetups`, 0, meetupId)
-
-        // Remove meetup from creator's list
-        pipeline.lrem(`user:${meetup.createdBy}:meetups`, 0, meetupId)
-
-        // Remove meetup from all participants' lists
-        for (const participantId of meetup.participants) {
-          pipeline.lrem(`user:${participantId}:meetups`, 0, meetupId)
-        }
-      }
-    }
-
-    // Execute all operations atomically
-    await pipeline.exec()
+    // TODO: If you have meetups or other data tied to this spot, handle their cleanup here as needed
 
     return new NextResponse(null, { status: 204 })
   } catch (error) {

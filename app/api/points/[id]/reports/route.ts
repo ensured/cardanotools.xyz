@@ -26,20 +26,19 @@ interface MapPoint {
   reports?: Report[]
 }
 
+const POINTS_KEY = 'points:all'
+
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const params = await context.params
-
-    // Get the point
-    const point = await kv.get<MapPoint>(`point:${params.id}`)
+    const pointId = params.id
+    const points: MapPoint[] = (await kv.get(POINTS_KEY)) || []
+    const point = points.find((p) => p.id === pointId)
     if (!point) {
       return new NextResponse('Spot not found', { status: 404 })
     }
-
-    // Return reports sorted by creation date (newest first)
     const reports = point.reports || []
     reports.sort((a, b) => b.createdAt - a.createdAt)
-
     return NextResponse.json(reports)
   } catch (error) {
     console.error('[REPORTS_GET]', error)
@@ -51,38 +50,24 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   try {
     const { userId } = await auth()
     const params = await context.params
-
+    const pointId = params.id
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
-
     const user = await currentUser()
     const userEmail = user?.emailAddresses[0]?.emailAddress
     const userName =
       user?.firstName && user?.lastName
         ? `${user.firstName} ${user.lastName}`
         : user?.firstName || user?.username || 'Anonymous'
-
     if (!userEmail) {
       return new NextResponse('User email not found', { status: 400 })
     }
-
-    // Get the point
-    const point = await kv.get<MapPoint>(`point:${params.id}`)
-    if (!point) {
-      return new NextResponse('Spot not found', { status: 404 })
-    }
-
     const { reason } = await request.json()
-
     if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
       return new NextResponse('Invalid report reason', { status: 400 })
     }
-
-    // Generate a new UUID v7 for the report
     const reportId = uuidv7()
-
-    // Create the report
     const report: Report = {
       id: reportId,
       reason: reason.trim(),
@@ -91,23 +76,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       createdAt: Date.now(),
       status: 'pending',
     }
-
-    // Use pipeline for atomic operations
-    const pipeline = kv.pipeline()
-
-    // Add the report to the point's reports array
-    const updatedPoint: MapPoint = {
+    const points: MapPoint[] = (await kv.get(POINTS_KEY)) || []
+    const pointIndex = points.findIndex((p) => p.id === pointId)
+    if (pointIndex === -1) {
+      return new NextResponse('Spot not found', { status: 404 })
+    }
+    const point = points[pointIndex]
+    const reports = point.reports || []
+    points[pointIndex] = {
       ...point,
-      reports: [...(point.reports || []), report],
+      reports: [...reports, report],
       lastUpdated: Date.now(),
     }
-
-    // Update the point with the new report
-    pipeline.set(`point:${params.id}`, updatedPoint)
-
-    // Execute all operations atomically
-    await pipeline.exec()
-
+    await kv.set(POINTS_KEY, points)
     return NextResponse.json(report)
   } catch (error) {
     console.error('[REPORTS_POST]', error)
@@ -119,31 +100,26 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   try {
     const { userId } = await auth()
     const params = await context.params
+    const pointId = params.id
     const { reportId, status, resolution } = await request.json()
-
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
-
     if (!reportId || typeof reportId !== 'string') {
       return new NextResponse('Invalid report ID', { status: 400 })
     }
-
     if (!status || !['resolved', 'rejected'].includes(status)) {
       return new NextResponse('Invalid status', { status: 400 })
     }
-
     const user = await currentUser()
     const userEmail = user?.emailAddresses[0]?.emailAddress
     const userName =
       user?.firstName && user?.lastName
         ? `${user.firstName} ${user.lastName}`
         : user?.firstName || user?.username || 'Anonymous'
-
     if (!userEmail) {
       return new NextResponse('User email not found', { status: 400 })
     }
-
     // Check if user is admin
     const isAdmin = user.emailAddresses.some(
       (email) => email.emailAddress === process.env.ADMIN_EMAIL,
@@ -151,45 +127,33 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     if (!isAdmin) {
       return new NextResponse('Unauthorized', { status: 403 })
     }
-
-    // Get the point
-    const point = await kv.get<MapPoint>(`point:${params.id}`)
-    if (!point) {
+    const points: MapPoint[] = (await kv.get(POINTS_KEY)) || []
+    const pointIndex = points.findIndex((p) => p.id === pointId)
+    if (pointIndex === -1) {
       return new NextResponse('Spot not found', { status: 404 })
     }
-
-    // Find the report
-    const reportIndex = point.reports?.findIndex((r) => r.id === reportId)
-    if (reportIndex === -1 || reportIndex === undefined) {
+    const point = points[pointIndex]
+    const reports = point.reports || []
+    const reportIndex = reports.findIndex((r) => r.id === reportId)
+    if (reportIndex === -1) {
       return new NextResponse('Report not found', { status: 404 })
     }
-
-    // Update the report
     const updatedReport: Report = {
-      ...point.reports![reportIndex],
+      ...reports[reportIndex],
       status,
       resolution,
       resolvedBy: userEmail,
       resolvedByName: userName,
       resolvedAt: Date.now(),
     }
-
-    // Use pipeline for atomic operations
-    const pipeline = kv.pipeline()
-
-    // Update the point with the resolved report
-    const updatedPoint: MapPoint = {
+    const updatedReports = [...reports]
+    updatedReports[reportIndex] = updatedReport
+    points[pointIndex] = {
       ...point,
-      reports: point.reports?.map((r, i) => (i === reportIndex ? updatedReport : r)),
+      reports: updatedReports,
       lastUpdated: Date.now(),
     }
-
-    // Update the point with the resolved report
-    pipeline.set(`point:${params.id}`, updatedPoint)
-
-    // Execute all operations atomically
-    await pipeline.exec()
-
+    await kv.set(POINTS_KEY, points)
     return NextResponse.json(updatedReport)
   } catch (error) {
     console.error('[REPORTS_PATCH]', error)

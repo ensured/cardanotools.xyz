@@ -79,26 +79,30 @@
   }
 }
 .bg-grid-slate-100 {
-  background-image: linear-gradient(to right, #f1f5f910 1px, transparent 1px),
+  background-image:
+    linear-gradient(to right, #f1f5f910 1px, transparent 1px),
     linear-gradient(to bottom, #f1f5f910 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
 .bg-grid-slate-700 {
-  background-image: linear-gradient(to right, #334155 1px, transparent 1px),
+  background-image:
+    linear-gradient(to right, #334155 1px, transparent 1px),
     linear-gradient(to bottom, #334155 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
 @layer utilities {
   .bg-grid-slate-100 {
-    background-image: linear-gradient(to right, #f1f5f910 1px, transparent 1px),
+    background-image:
+      linear-gradient(to right, #f1f5f910 1px, transparent 1px),
       linear-gradient(to bottom, #f1f5f910 1px, transparent 1px);
     background-size: 24px 24px;
   }
 
   .bg-grid-slate-700 {
-    background-image: linear-gradient(to right, #334155 1px, transparent 1px),
+    background-image:
+      linear-gradient(to right, #334155 1px, transparent 1px),
       linear-gradient(to bottom, #334155 1px, transparent 1px);
     background-size: 24px 24px;
   }
@@ -395,10 +399,19 @@
 }
 
 @keyframes bounceCount {
-  0%, 100% { transform: scale(1); }
-  25% { transform: scale(1.2); }
-  50% { transform: scale(0.9); }
-  75% { transform: scale(1.1); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  25% {
+    transform: scale(1.2);
+  }
+  50% {
+    transform: scale(0.9);
+  }
+  75% {
+    transform: scale(1.1);
+  }
 }
 
 .remaining-count {
@@ -409,4 +422,20 @@
 .remaining-count.changing {
   animation: bounceCount 0.4s ease;
   color: hsl(var(--primary));
+}
+
+@keyframes thumbClick {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+.animate-thumb-click:active {
+  animation: thumbClick 0.3s ease-in-out;
 }
