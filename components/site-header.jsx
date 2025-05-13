@@ -19,7 +19,7 @@ export async function SiteHeader() {
             <div className="flex shrink-0 items-center justify-center">
               <UserLoginButtons />
             </div>
-            <FeedbackForm />
+            
             <ThemeToggle />
           </nav>
         </div>
