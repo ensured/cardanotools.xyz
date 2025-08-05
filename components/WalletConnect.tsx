@@ -195,9 +195,9 @@ const WalletConnect = ({ className, isAdaHandleVisible, isWalletAddressVisible }
 						<div className="flex flex-col items-center justify-center rounded-t-md border-b-0 border-l border-r border-t border-border p-4 px-6 text-lg outline-none md:text-xl">
 							<div className="flex flex-col items-center justify-center">
 								<div className="flex-1">Select a Wallet</div>
-								<div className="text-xs text-muted-foreground">
+                {/* <div className="text-xs text-muted-foreground">
 									You can unlink a wallet at any time by clicking the Unlink button. Deletes all associated data.
-								</div>
+								</div> */}
 							</div>
 						</div>
 
