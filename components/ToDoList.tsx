@@ -940,7 +940,7 @@ export default function ToDoList() {
       )}
 
       {/* Items per page selector */}
-      <div className="flex items-center mt-4 w-full">
+      {/* <div className="flex items-center mt-4 w-full">
         <div className="flex items-center justify-between w-full gap-2">
           <Pagination>
             <PaginationContent>
@@ -994,9 +994,9 @@ export default function ToDoList() {
               </PaginationItem>
             </PaginationContent>
           </Pagination>
-        </div>
-
-      </div>
+        </div> 
+      </div> 
+      */}
 
       <Dialog open={showSaveDialog} onOpenChange={(open) => {
         if (!open) handleDialogClose(false)
