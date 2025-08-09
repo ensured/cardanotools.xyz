@@ -1,13 +1,12 @@
 'use client'
 
 import { useState, useEffect, ChangeEvent, useRef, useMemo } from 'react'
-
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { CheckIcon, PencilIcon, ShoppingCart, Trash2Icon, XIcon, SearchIcon, ChevronDown, Settings2, ListX, LucideDelete, EraserIcon, Trash2, Plus, Settings } from 'lucide-react'
+import { CheckIcon, ShoppingCart, Trash2Icon, XIcon, Trash2, Plus, Settings } from 'lucide-react'
 import {
   Pagination,
   PaginationContent,
@@ -42,11 +41,6 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Label } from '@radix-ui/react-label'
 
@@ -58,8 +52,9 @@ const ITEMS_PER_PAGE = 10
 // Initialize with default stores
 const defaultStores = {
   coop: 'Co-Op',
+  costco: 'Costco',
   shopncart: 'Shop N Cart',
-  albertons: 'Albertsons',
+  albertsons: 'Albertsons',
   none: 'No Store'
 } as const
 
