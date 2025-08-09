@@ -72,8 +72,6 @@ interface ShoppingItem {
 
 // Add SortableItem component
 const SortableItem = ({ item, isMultiSelectMode, selectedItems, toggleItemSelection, toggleItemCompletion, editingItemId, inputRef, newItemInputRef, saveButtonRef, editedItemText, updateItem, editItemValid, handleEditItemChange, startEditingItem, deleteItem }: { item: ShoppingItem, isMultiSelectMode: boolean, selectedItems: Set<number>, toggleItemSelection: (id: number) => void, toggleItemCompletion: (id: number) => void, editingItemId: number | null, inputRef: React.RefObject<HTMLInputElement>, newItemInputRef: React.RefObject<HTMLInputElement>, saveButtonRef: React.RefObject<HTMLButtonElement>, editedItemText: string, updateItem: () => void, editItemValid: boolean, handleEditItemChange: (e: ChangeEvent<HTMLInputElement>) => void, startEditingItem: (id: number, text: string) => void, deleteItem: (id: number) => void }) => {
-  // Make sure the item has an ID
-  if (!item.id) return null;
   const {
     attributes,
     listeners,
@@ -81,7 +79,10 @@ const SortableItem = ({ item, isMultiSelectMode, selectedItems, toggleItemSelect
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.id });
+  } = useSortable({ id: item.id || 0 });
+
+  // Make sure the item has an ID
+  if (!item.id) return null;
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -201,6 +202,7 @@ export default function ToDoList() {
   // State for items and pagination
   const [items, setItems] = useState<ShoppingItem[]>([])
   const [currentPage, setCurrentPage] = useState<number>(1)
+  const ITEMS_PER_PAGE = 10; // Number of items to show per page
 
   // Store management state
   const [stores, setStores] = useState<StoreConfig>(() => {
@@ -272,7 +274,7 @@ export default function ToDoList() {
   const [isOpen, setIsOpen] = useState(false)
 
   // Pagination state
-  const [itemsPerPage, setItemsPerPage] = useState<number>(ITEMS_PER_PAGE);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
 
   // Group items by store
   const itemsByStore = useMemo(() => {
@@ -359,13 +361,6 @@ export default function ToDoList() {
       </DndContext>
     )
   }
-
-  // Calculate pagination
-  const totalPages = Math.ceil(items.length / itemsPerPage)
-  const paginatedItems = items.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  )
 
   // Add sensors for drag handling
   const sensors = useSensors(
@@ -640,6 +635,25 @@ export default function ToDoList() {
     });
   }, [items, filter]);
 
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredItems.length / itemsPerPage) || 1;
+  const paginatedItems = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredItems.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredItems, currentPage, itemsPerPage]);
+
+  // Ensure currentPage is within valid range when items are filtered or deleted
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
+  // Reset to first page when filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter]);
+
   // Avoid SSR issues
   if (!isMounted) return null
 
@@ -880,10 +894,10 @@ export default function ToDoList() {
             <DialogHeader>
               <DialogTitle>Delete Store</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete the "{storeToDelete && stores[storeToDelete]}" store?
+                Are you sure you want to delete the &quot;{storeToDelete && stores[storeToDelete]}&quot; store?
                 {storeToDelete && items.some(item => item.store === storeToDelete) && (
-                  <span className="block mt-2 text-amber-500">
-                    Note: This store has {items.filter(item => item.store === storeToDelete).length} items that will be moved to "No Store".
+                  <span className="mt-2 block text-amber-500">
+                    Note: This store has {items.filter(item => item.store === storeToDelete).length} items that will be moved to &quot;No Store&quot;.
                   </span>
                 )}
               </DialogDescription>
@@ -917,7 +931,13 @@ export default function ToDoList() {
         </Dialog>
       </div>
 
-      {renderItems()}
+      {paginatedItems.length > 0 ? (
+        renderItems()
+      ) : (
+        <div className="text-center py-8 text-muted-foreground">
+          {items.length === 0 ? "No items in the list" : "No items match your current filter"}
+        </div>
+      )}
 
       {/* Items per page selector */}
       <div className="flex items-center mt-4 w-full">
