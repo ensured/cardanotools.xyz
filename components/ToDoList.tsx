@@ -5,8 +5,9 @@ import { useState, useEffect, ChangeEvent, useRef, useMemo } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { CheckIcon, PencilIcon, ShoppingCart, Trash2Icon, XIcon, SearchIcon, ChevronDown, Settings2 } from 'lucide-react'
+import { CheckIcon, PencilIcon, ShoppingCart, Trash2Icon, XIcon, SearchIcon, ChevronDown, Settings2, ListX, LucideDelete, EraserIcon, Trash2, Plus, Settings } from 'lucide-react'
 import {
   Pagination,
   PaginationContent,
@@ -46,26 +47,38 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
+import { Label } from '@radix-ui/react-label'
 
 // Constants
 const MAX_ITEMS = 9999
-const ITEMS_PER_PAGE = 50
+const ITEMS_PER_PAGE = 10
+
+// Store configuration
+// Initialize with default stores
+const defaultStores = {
+  coop: 'Co-Op',
+  shopncart: 'Shop N Cart',
+  albertons: 'Albertsons',
+  none: 'No Store'
+} as const
+
+type StoreConfig = Record<string, string>
+
+type StoreKey = keyof typeof defaultStores
 
 interface ShoppingItem {
   id: number
   text: string
   completed: boolean
-}
-
-interface Todo {
-  id: string;
-  text: string;
-  completed: boolean;
-  // Add any other fields your todos might have
+  store?: StoreKey
+  createdAt: number
 }
 
 // Add SortableItem component
-function SortableItem({ item, isMultiSelectMode, selectedItems, toggleItemSelection, toggleItemCompletion, editingItemId, inputRef, newItemInputRef, saveButtonRef, editedItemText, updateItem, editItemValid, handleEditItemChange, startEditingItem, deleteItem }: { item: ShoppingItem, isMultiSelectMode: boolean, selectedItems: Set<number>, toggleItemSelection: (id: number) => void, toggleItemCompletion: (id: number) => void, editingItemId: number | null, inputRef: React.RefObject<HTMLInputElement>, newItemInputRef: React.RefObject<HTMLInputElement>, saveButtonRef: React.RefObject<HTMLButtonElement>, editedItemText: string, updateItem: () => void, editItemValid: boolean, handleEditItemChange: (e: ChangeEvent<HTMLInputElement>) => void, startEditingItem: (id: number, text: string) => void, deleteItem: (id: number) => void }) {
+const SortableItem = ({ item, isMultiSelectMode, selectedItems, toggleItemSelection, toggleItemCompletion, editingItemId, inputRef, newItemInputRef, saveButtonRef, editedItemText, updateItem, editItemValid, handleEditItemChange, startEditingItem, deleteItem }: { item: ShoppingItem, isMultiSelectMode: boolean, selectedItems: Set<number>, toggleItemSelection: (id: number) => void, toggleItemCompletion: (id: number) => void, editingItemId: number | null, inputRef: React.RefObject<HTMLInputElement>, newItemInputRef: React.RefObject<HTMLInputElement>, saveButtonRef: React.RefObject<HTMLButtonElement>, editedItemText: string, updateItem: () => void, editItemValid: boolean, handleEditItemChange: (e: ChangeEvent<HTMLInputElement>) => void, startEditingItem: (id: number, text: string) => void, deleteItem: (id: number) => void }) => {
+  // Make sure the item has an ID
+  if (!item.id) return null;
   const {
     attributes,
     listeners,
@@ -85,29 +98,34 @@ function SortableItem({ item, isMultiSelectMode, selectedItems, toggleItemSelect
       ref={setNodeRef}
       style={style}
       className={`group relative rounded-md border ${isDragging
-        ? 'border-primary/50 bg-muted/50 shadow-md ring-1 ring-primary/20'
+        ? 'border-primary/50 bg-muted/50 shadow-md ring-1 ring-primary/20 z-10'
         : 'border-border/40 hover:border-border hover:bg-muted/20'
         } transition-all duration-200`}
     >
-      <div
+      {/* Drag Handle */}
+      <button
         {...attributes}
         {...listeners}
-        className="absolute left-0 top-0 h-full w-8 cursor-move hidden sm:flex items-center justify-center rounded-l-md 
+        type="button"
+        className="absolute left-0 top-0 h-full w-8 cursor-grab active:cursor-grabbing hidden sm:flex items-center justify-center rounded-l-md 
           bg-muted/30 text-muted-foreground/50 
-          group-hover:bg-muted/50 group-hover:text-muted-foreground 
-          active:bg-muted/70 transition-all
+          hover:bg-muted/50 hover:text-muted-foreground 
+          active:bg-muted/70 transition-all focus:outline-none focus-visible:ring-1 focus-visible:ring-ring
           sm:w-10"
         title="Drag to reorder"
+        onClick={(e) => e.stopPropagation()}
       >
         <svg
           className="size-3.5 transition-transform duration-200 group-hover:scale-110 sm:size-4"
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 24 24"
           fill="currentColor"
+          aria-hidden="true"
         >
           <path d="M8 6a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM8 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM8 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM14 6a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM14 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM14 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM20 6a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM20 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0ZM20 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z" />
         </svg>
-      </div>
+        <span className="sr-only">Drag to reorder</span>
+      </button>
       <div className="flex flex-1 items-center justify-between gap-x-1 py-1.5 pl-2 pr-2 sm:py-2 sm:pl-12 sm:pr-2">
         <div className="flex flex-1 items-center gap-1.5 sm:gap-2">
           <Checkbox
@@ -189,10 +207,41 @@ export default function ToDoList() {
   const [items, setItems] = useState<ShoppingItem[]>([])
   const [currentPage, setCurrentPage] = useState<number>(1)
 
+  // Store management state
+  const [stores, setStores] = useState<StoreConfig>(() => {
+    const savedStores = typeof window !== 'undefined' ? localStorage.getItem('shoppingStores') : null;
+    return savedStores ? JSON.parse(savedStores) : defaultStores;
+  });
+  const [newStoreName, setNewStoreName] = useState('');
+  const [showStoreSettings, setShowStoreSettings] = useState(false);
+  const [storeToDelete, setStoreToDelete] = useState<string | null>(null);
+  const [showDeleteStoreDialog, setShowDeleteStoreDialog] = useState(false);
+
   // State for new item input
   const [newItem, setNewItem] = useState<string>('')
-  const [newItemValid, setNewItemValid] = useState<boolean>(true)
+  const [selectedStore, setSelectedStore] = useState<string | null>("coop")
+  const [newItemValid, setNewItemValid] = useState<boolean>(false)
   const [isInputFocused, setIsInputFocused] = useState<boolean>(false)
+
+  // Handler for input change
+  const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setNewItem(e.target.value);
+    setNewItemValid(e.target.value.trim().length > 0);
+  };
+
+  // Handler for select change
+  const handleSelectChange = (value: string) => {
+    setSelectedStore(value === 'none' ? null : value);
+
+    // Focus back on the input after selection
+    setTimeout(() => {
+      if (newItemInputRef.current) {
+        newItemInputRef.current.focus();
+      }
+    }, 10);
+  };
+
+
 
   // State for editing
   const [editingItemId, setEditingItemId] = useState<number | null>(null)
@@ -205,6 +254,7 @@ export default function ToDoList() {
   const [itemToDelete, setItemToDelete] = useState<number | null>(null)
   const [pendingItemId, setPendingItemId] = useState<number | null>(null)
   const [pendingText, setPendingText] = useState('')
+  const [lastDeletionTime, setLastDeletionTime] = useState<number | null>(null)
 
   // Component mount state
   const [isMounted, setIsMounted] = useState<boolean>(false)
@@ -220,31 +270,119 @@ export default function ToDoList() {
   // Add state for multi-select mode
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false)
 
-  // Add state for search and filter
-  const [searchTerm, setSearchTerm] = useState('')
+  // Add state for filter
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all')
 
   // Add state for collapsible
   const [isOpen, setIsOpen] = useState(false)
 
+  // Pagination state
+  const [itemsPerPage, setItemsPerPage] = useState<number>(ITEMS_PER_PAGE);
+
+  // Group items by store
+  const itemsByStore = useMemo(() => {
+    const groups: Record<string, ShoppingItem[]> = {}
+
+    items.forEach(item => {
+      const storeKey = item.store || 'none'
+      const storeName = stores[storeKey] || 'No Store'
+      if (!groups[storeName]) {
+        groups[storeName] = []
+      }
+      groups[storeName].push(item)
+    })
+
+    // Filter out empty groups and sort by store name
+    return Object.entries(groups)
+      .filter(([_, storeItems]) => storeItems.length > 0)
+      .sort(([storeA], [storeB]) => storeA.localeCompare(storeB))
+  }, [items, stores])
+
+  // Render the list of items grouped by store
+  const renderItems = () => {
+    if (items.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <ShoppingCart className="mb-4 size-12 text-muted-foreground" />
+          <h3 className="text-lg font-medium text-muted-foreground">No items yet</h3>
+          <p className="text-sm text-muted-foreground">Add some items to get started</p>
+        </div>
+      )
+    }
+
+    return (
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+        autoScroll={false}
+      >
+        <SortableContext
+          items={items.map(item => item.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="space-y-6">
+            {itemsByStore.map(([storeName, storeItems]) => (
+              <div key={storeName} className="space-y-2">
+                <div className="relative my-1">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-border" />
+                  </div>
+                  <div className="relative flex justify-center">
+                    <Badge
+                      variant="secondary"
+                      className="px-2 py-0.5 h-5 text-xs font-normal bg-background/80 backdrop-blur-sm"
+                    >
+                      {storeName}
+                    </Badge>
+                  </div>
+                </div>
+                {storeItems.map((item) => (
+                  <SortableItem
+                    key={item.id}
+                    item={item}
+                    isMultiSelectMode={isMultiSelectMode}
+                    selectedItems={selectedItems}
+                    toggleItemSelection={toggleItemSelection}
+                    toggleItemCompletion={toggleItemCompletion}
+                    editingItemId={editingItemId}
+                    inputRef={inputRef}
+                    newItemInputRef={newItemInputRef}
+                    saveButtonRef={saveButtonRef}
+                    editedItemText={editedItemText}
+                    updateItem={updateItem}
+                    editItemValid={editItemValid}
+                    handleEditItemChange={handleEditItemChange}
+                    startEditingItem={startEditingItem}
+                    deleteItem={deleteItem}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+    )
+  }
+
   // Calculate pagination
-  const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE)
+  const totalPages = Math.ceil(items.length / itemsPerPage)
   const paginatedItems = items.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
   )
 
   // Add sensors for drag handling
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 8,
+        distance: 4, // Pixels to move before dragging starts
       },
     }),
     useSensor(TouchSensor, {
       activationConstraint: {
-        delay: 250,
-        tolerance: 5,
+        delay: 150, // ms to wait before drag starts
+        tolerance: 5, // px of movement allowed during delay
       },
     }),
     useSensor(KeyboardSensor, {
@@ -261,12 +399,13 @@ export default function ToDoList() {
     }
   }, [])
 
-  // Save items to localStorage
+  // Save items and stores to localStorage
   useEffect(() => {
     if (isMounted) {
-      localStorage.setItem('shoppingItems', JSON.stringify(items))
+      localStorage.setItem('shoppingItems', JSON.stringify(items));
+      localStorage.setItem('shoppingStores', JSON.stringify(stores));
     }
-  }, [items, isMounted])
+  }, [items, stores, isMounted])
 
   // Reset to first page when items length changes
   useEffect(() => {
@@ -323,7 +462,16 @@ export default function ToDoList() {
       return
     }
     setNewItemValid(true)
-    setItems([...items, { id: Date.now(), text: newItem, completed: false }])
+
+    const newItemObj: ShoppingItem = {
+      id: Date.now(),
+      text: newItem,
+      completed: false,
+      store: selectedStore as StoreKey,
+      createdAt: Date.now()
+    }
+
+    setItems([...items, newItemObj])
     setNewItem('')
     inputRef.current?.focus()
   }
@@ -373,8 +521,19 @@ export default function ToDoList() {
   }
 
   const deleteItem = (id: number): void => {
-    setItemToDelete(id)
-    setShowDeleteDialog(true)
+    const now = Date.now()
+    const lastDeletion = lastDeletionTime || 0
+
+    // If last deletion was within 5 seconds, delete without confirmation :)
+    if (now - lastDeletion < 5000) {
+      setItems(items.filter((item) => item.id !== id))
+      toast.success('Item deleted')
+      setLastDeletionTime(now)
+    } else {
+      // Otherwise, show confirmation dialog
+      setItemToDelete(id)
+      setShowDeleteDialog(true)
+    }
   }
 
   // Add selection handlers
@@ -405,12 +564,6 @@ export default function ToDoList() {
     setItems(items.filter(item => !selectedItems.has(item.id)))
     setSelectedItems(new Set())
     toast.success(`Deleted ${selectedItems.size} items`)
-  }
-
-  // Input handlers
-  const handleNewItemChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setNewItem(e.target.value)
-    setNewItemValid(e.target.value.trim().length >= 1)
   }
 
   const handleEditItemChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -445,6 +598,7 @@ export default function ToDoList() {
     if (confirmed && itemToDelete !== null) {
       setItems(items.filter((item) => item.id !== itemToDelete))
       toast.success('Item deleted')
+      setLastDeletionTime(Date.now())
     }
     setShowDeleteDialog(false)
     setItemToDelete(null)
@@ -452,31 +606,44 @@ export default function ToDoList() {
 
   // Add handler for drag end
   const handleDragEnd = (event: any) => {
-    const { active, over } = event
+    const { active, over } = event;
 
-    if (active.id !== over.id) {
-      setItems((items) => {
-        const oldIndex = items.findIndex((item) => item.id === active.id)
-        const newIndex = items.findIndex((item) => item.id === over.id)
-        return arrayMove(items, oldIndex, newIndex)
-      })
-    }
+    if (!over || active.id === over.id) return;
+
+    setItems((items) => {
+      const oldIndex = items.findIndex(item => item.id === active.id);
+      const newIndex = items.findIndex(item => item.id === over.id);
+
+      if (oldIndex === -1 || newIndex === -1) return items;
+
+      // Get the item being moved
+      const movedItem = items[oldIndex];
+      // Get the target item
+      const targetItem = items[newIndex];
+
+      // Create a new array with the item moved to its new position
+      const newItems = [...items];
+      // Remove the item from its old position
+      newItems.splice(oldIndex, 1);
+      // Insert it at the new position
+      newItems.splice(newIndex, 0, {
+        ...movedItem,
+        // Update the store if we're moving to a different store group
+        store: targetItem.store
+      });
+
+      return newItems;
+    });
   }
 
   // Filter and search todos
-  const filteredTodos = useMemo(() => {
-    return items
-      .filter(item => {
-        // Apply status filter
-        if (filter === 'active') return !item.completed;
-        if (filter === 'completed') return item.completed;
-        return true;
-      })
-      .filter(item => {
-        // Apply search filter
-        return item.text.toLowerCase().includes(searchTerm.toLowerCase());
-      });
-  }, [items, searchTerm, filter]);
+  const filteredItems = useMemo(() => {
+    return items.filter(item => {
+      if (filter === 'active') return !item.completed
+      if (filter === 'completed') return item.completed
+      return true
+    });
+  }, [items, filter]);
 
   // Avoid SSR issues
   if (!isMounted) return null
@@ -500,213 +667,266 @@ export default function ToDoList() {
         </div>
       </h1>
 
-      {/* Input form */}
-      <form className="mb-1 flex items-center gap-x-1" onSubmit={addItem}>
-        <Input
-          ref={newItemInputRef}
-          type="text"
-          placeholder="Add a new item"
-          value={newItem}
-          onChange={handleNewItemChange}
-          onFocus={() => setIsInputFocused(true)}
-          className={`text-sm h-8 ${isInputFocused
-            ? !newItemValid
-              ? 'border-red-500/60 ring-red-500/60'
-              : 'border-green/60 ring-green/60'
-            : 'border-border'
-            }`}
-        />
-        <Button
-          type="submit"
-          className="h-8"
-          variant={'outline'}
-        >
-          Add
-        </Button>
+      {/* Input form with integrated select */}
+      <form
+        className="mb-1 flex items-center gap-x-1"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const finalText = newItem.trim();
+          if (finalText) {
+            const storeName = selectedStore && selectedStore !== 'none' ? stores[selectedStore] : null;
+            const storeText = storeName ? ` - (${storeName})` : '';
+            addItem({ preventDefault: () => { }, currentTarget: { value: finalText + storeText } } as any);
+            setNewItem('');
+            newItemInputRef.current?.focus();
+          }
+        }}
+      >
+        <div className="relative flex-1 group">
+          <Label htmlFor="item-input" className="sr-only">New item</Label>
+          <div className="relative">
+            <Input
+              id="item-input"
+              ref={newItemInputRef}
+              type="text"
+              placeholder="Add a new item"
+              value={newItem}
+              onChange={handleInputChange}
+              onFocus={() => setIsInputFocused(true)}
+              onBlur={() => setIsInputFocused(false)}
+              className={`text-sm h-8 w-full pl-3 pr-28 focus-visible:ring-1 focus-visible:ring-offset-0 ${!newItemValid && isInputFocused
+                ? 'border-red-500/60 focus-visible:ring-red-500/60'
+                : 'border-input focus-visible:ring-ring'
+                }`}
+            />
+            <div className="absolute right-0 top-0 h-full flex items-center">
+              <div className="h-4/5 w-px bg-border" />
+              <Select
+                onValueChange={handleSelectChange}
+                value={selectedStore || 'none'}
+              >
+                <SelectTrigger className="h-8 w-32 border-l rounded-l-none">
+                  <SelectValue placeholder="Store" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Store</SelectItem>
+                  {Object.entries(stores as Record<string, string>)
+                    .filter(([key]) => key !== 'none')
+                    .map(([key, name]) => (
+                      <SelectItem key={key} value={key}>
+                        {name as string}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="submit"
+                size="sm"
+                className="h-8 rounded-l-none px-3"
+                disabled={!newItem.trim()}
+              >
+                <ShoppingCart className="h-4 w-4" />
+                <span className="sr-only">Add item</span>
+              </Button>
+            </div>
+          </div>
+        </div>
       </form>
 
-      {/* Search and Delete Multiple buttons */}
-      <div className="mb-1 flex items-center gap-1">
-        <div
-          role="button"
-          className="flex-1 flex items-center justify-between h-8 px-4 border rounded-md border-input bg-background hover:bg-accent hover:text-accent-foreground cursor-pointer"
-          onClick={() => setIsOpen(!isOpen)}
-        >
+      {/* Action Bar with Delete Multiple and Filter controls */}
+      <div className="flex items-center justify-between gap-2">
+        {/* Delete Multiple Button - Always visible when there are items */}
+        {items.length > 0 && (
           <div className="flex items-center gap-2">
-            <SearchIcon className="h-4 w-4" />
-            <span className="hidden sm:inline">Search and Filter</span>
-            <span className="sm:hidden">Search</span>
-            <Settings2 className="h-4 w-4 sm:hidden" />
-          </div>
-          <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'transform rotate-180' : ''}`} />
-        </div>
+            {isMultiSelectMode ? (
+              <div className="flex items-center gap-2 bg-muted/50 rounded-md">
+                <Button
+                  variant={selectedItems.size > 0 ? "destructive" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    if (selectedItems.size > 0) {
+                      setItemToDelete(null);
+                      setShowDeleteDialog(true);
+                    }
+                  }}
+                  disabled={selectedItems.size === 0}
+                  className="h-8 gap-1.5"
+                >
+                  <Trash2Icon className="h-4 w-4" />
+                  <span className="hidden sm:inline">
+                    {selectedItems.size > 0
+                      ? `Delete (${selectedItems.size})`
+                      : 'Delete (0)'}
+                  </span>
+                </Button>
 
-        {paginatedItems.length > 0 && !isMultiSelectMode && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsMultiSelectMode(true)}
-            className="h-8 whitespace-nowrap"
-          >
-            Delete Multiple
-          </Button>
-        )}
-      </div>
+                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                  <Checkbox
+                    id="select-all"
+                    checked={selectedItems.size === paginatedItems.length && paginatedItems.length > 0}
+                    onCheckedChange={toggleSelectAll}
+                    className="h-4 w-4"
+                  />
+                  <Label
+                    htmlFor="select-all"
+                    className="text-sm font-medium leading-none cursor-pointer hover:text-foreground"
+                  >
+                    Select all
+                  </Label>
+                </div>
 
-      {/* Collapsible content */}
-      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleContent className="space-y-1 pt-1">
-          {/* Search input */}
-          <div className="space-y-1">
-            <label htmlFor="search" className="text-xs font-medium">
-              Search Items
-            </label>
-            <Input
-              id="search"
-              type="text"
-              placeholder="Search items..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="text-sm h-8"
-            />
-          </div>
-
-          {/* Filter buttons */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium">
-                Filter by Status
-              </label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setIsMultiSelectMode(false);
+                    setSelectedItems(new Set());
+                  }}
+                  className="h-8 px-2"
+                >
+                  <XIcon className="h-4 w-4" />
+                  <span className="sr-only">Cancel</span>
+                </Button>
+              </div>
+            ) : (
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                onClick={() => {
-                  setSearchTerm('')
-                  setFilter('all')
-                  setIsOpen(false)
-                }}
-                className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setIsMultiSelectMode(true)}
+                className="h-8 gap-1.5"
               >
-                Reset filters
-              </Button>
-            </div>
-            <div className="flex gap-1">
-              <Button
-                onClick={() => setFilter('all')}
-                variant={filter === 'all' ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 flex-1"
-              >
-                All
-              </Button>
-              <Button
-                onClick={() => setFilter('active')}
-                variant={filter === 'active' ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 flex-1"
-              >
-                Active
-              </Button>
-              <Button
-                onClick={() => setFilter('completed')}
-                variant={filter === 'completed' ? 'default' : 'outline'}
-                size="sm"
-                className="h-7 flex-1"
-              >
-                Completed
-              </Button>
-            </div>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-
-      {/* Move multi-select mode controls here if active */}
-      {isMultiSelectMode && (
-        <div className="mb-1 flex items-center gap-2">
-          <Checkbox
-            checked={selectedItems.size === paginatedItems.length && paginatedItems.length > 0}
-            onCheckedChange={toggleSelectAll}
-            aria-label="Select all items"
-            className="size-4 sm:size-5"
-          />
-          <span className="text-xs sm:text-sm text-muted-foreground">
-            {selectedItems.size} selected
-          </span>
-          <div className="ml-auto flex gap-1 sm:gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setIsMultiSelectMode(false)
-                setSelectedItems(new Set())
-              }}
-              className="h-7 sm:h-8 text-xs sm:text-sm"
-            >
-              Cancel
-            </Button>
-            {selectedItems.size > 0 && (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  setItemToDelete(null)
-                  setShowDeleteDialog(true)
-                }}
-                className="h-7 sm:h-8 text-xs sm:text-sm"
-              >
-                Delete Selected ({selectedItems.size})
+                <Trash2 className="h-4 w-4" />
+                <span className="hinline">Select Items</span>
               </Button>
             )}
           </div>
-        </div>
-      )}
+        )}
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext
-          items={filteredTodos}
-          strategy={verticalListSortingStrategy}
+        {/* Store Settings Button */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowStoreSettings(true)}
+          className="h-8 gap-1.5 ml-auto"
         >
-          <div className="space-y-1">
-            {filteredTodos.map((item) => (
-              <SortableItem
-                key={item.id}
-                item={item}
-                isMultiSelectMode={isMultiSelectMode}
-                selectedItems={selectedItems}
-                toggleItemSelection={toggleItemSelection}
-                toggleItemCompletion={toggleItemCompletion}
-                editingItemId={editingItemId}
-                inputRef={inputRef}
-                newItemInputRef={newItemInputRef}
-                saveButtonRef={saveButtonRef}
-                deleteItem={deleteItem}
-                editedItemText={editedItemText}
-                updateItem={updateItem}
-                editItemValid={editItemValid}
-                handleEditItemChange={handleEditItemChange}
-                startEditingItem={startEditingItem}
-              />
-            ))}
-          </div>
-        </SortableContext>
-      </DndContext>
+          <Settings className="h-4 w-4" />
+          <span className="hidden sm:inline">Stores</span>
+        </Button>
 
-      {/* Add a "no results" message */}
-      {filteredTodos.length === 0 && (
-        <p className="text-center text-muted-foreground py-8">
-          {items.length === 0
-            ? "No items in the list"
-            : "No items match your search"}
-        </p>
-      )}
+        {/* Store Settings Dialog */}
+        <Dialog open={showStoreSettings} onOpenChange={setShowStoreSettings}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Manage Stores</DialogTitle>
+              <DialogDescription>
+                Add or remove stores from your shopping list.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="New store name"
+                  value={newStoreName}
+                  onChange={(e) => setNewStoreName(e.target.value)}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  onClick={() => {
+                    if (newStoreName.trim()) {
+                      const newStoreKey = newStoreName.toLowerCase().replace(/\s+/g, '-');
+                      setStores(prev => ({
+                        ...prev,
+                        [newStoreKey]: newStoreName.trim()
+                      }));
+                      setNewStoreName('');
+                    }
+                  }}
+                  disabled={!newStoreName.trim()}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add
+                </Button>
+              </div>
 
-      {/* Add pagination component at the bottom */}
-      {totalPages > 1 && (
-        <div className="mt-4">
+              <div className="border rounded-md divide-y">
+                {Object.entries(stores).map(([key, name]) => {
+                  if (key === 'none') return null; // Skip the 'No Store' option
+                  return (
+                    <div key={key} className="flex items-center justify-between p-2 hover:bg-muted/50">
+                      <span>{name}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive"
+                        onClick={() => {
+                          setStoreToDelete(key);
+                          setShowDeleteStoreDialog(true);
+                        }}
+                        disabled={Object.keys(stores).length <= 1}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span className="sr-only">Delete store</span>
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setShowStoreSettings(false)}>Done</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Store Confirmation Dialog */}
+        <Dialog open={showDeleteStoreDialog} onOpenChange={setShowDeleteStoreDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete Store</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete the "{storeToDelete && stores[storeToDelete]}" store?
+                {storeToDelete && items.some(item => item.store === storeToDelete) && (
+                  <span className="block mt-2 text-amber-500">
+                    Note: This store has {items.filter(item => item.store === storeToDelete).length} items that will be moved to "No Store".
+                  </span>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowDeleteStoreDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  if (storeToDelete) {
+                    // Move items to 'none' store
+                    setItems(prevItems =>
+                      prevItems.map(item =>
+                        item.store === storeToDelete ? { ...item, store: 'none' } : item
+                      )
+                    );
+                    // Remove the store
+                    const newStores = { ...stores };
+                    delete newStores[storeToDelete];
+                    setStores(newStores);
+                    setShowDeleteStoreDialog(false);
+                  }
+                }}
+              >
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {renderItems()}
+
+      {/* Items per page selector */}
+      <div className="flex items-center mt-4 w-full">
+        <div className="flex items-center justify-between w-full gap-2">
           <Pagination>
             <PaginationContent>
               <PaginationItem>
@@ -760,7 +980,8 @@ export default function ToDoList() {
             </PaginationContent>
           </Pagination>
         </div>
-      )}
+
+      </div>
 
       <Dialog open={showSaveDialog} onOpenChange={(open) => {
         if (!open) handleDialogClose(false)
@@ -827,4 +1048,4 @@ export default function ToDoList() {
       </Dialog>
     </div>
   )
-}
+} 

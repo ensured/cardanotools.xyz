@@ -13,7 +13,8 @@ const ProtectedMap = dynamic(() => import('@/components/ProtectedMap'), {
 export default function MapPage() {
   return (
     <div className="h-screen w-full" suppressHydrationWarning>
-      <ProtectedMap />
+      Too many read/writes to firestore. Rewrite later (use local db)
+      {/* <ProtectedMap />  */}
     </div>
   )
 }
