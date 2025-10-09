@@ -232,12 +232,17 @@ const useRecipeSearch = () => {
           return
         }
 
-        setSearchResults((prevSearchResults) => ({
-          ...prevSearchResults,
-          hits: [...prevSearchResults.hits, ...data.hits],
-          count: data.count,
-          nextPage: data._links.next?.href || '',
-        }))
+        setSearchResults((prevSearchResults) => {
+          // Ensure we're working with a flat array of recipes
+          const newHits = Array.isArray(data.hits) ? data.hits : [];
+          
+          return {
+            ...prevSearchResults,
+            hits: [...prevSearchResults.hits, ...newHits],
+            count: data.count || prevSearchResults.count,
+            nextPage: data._links?.next?.href || '',
+          };
+        })
         setLoadingMore(false)
       } catch (error) {
         toast(error.message, {

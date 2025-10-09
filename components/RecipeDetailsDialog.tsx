@@ -21,7 +21,7 @@ import {
   Download,
 } from 'lucide-react'
 import Link from 'next/link'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { toast } from 'react-hot-toast'
 import Image from 'next/image'
 import { formatRecipeForDownload } from '@/utils/recipeFormatter'
@@ -37,6 +37,61 @@ interface RecipeDetailsDialogProps {
   isOpen: boolean
   setIsOpen: (open: boolean) => void
   recipe: any // We can type this more strictly if needed
+}
+
+// Parse a fraction string (e.g., '1 1/2') to a number
+const parseFraction = (fractionString: string): number => {
+  if (!fractionString) return 0
+
+  // Handle whole numbers
+  if (!fractionString.includes('/')) {
+    return Number(fractionString) || 0
+  }
+
+  // Handle fractions and mixed numbers
+  const parts = fractionString.trim().split(' ')
+  if (parts.length === 1) {
+    // Simple fraction like '1/2'
+    const [numerator, denominator] = parts[0].split('/').map(Number)
+    return denominator ? numerator / denominator : 0
+  } else {
+    // Mixed number like '1 1/2'
+    const whole = Number(parts[0]) || 0
+    const [numerator, denominator] = parts[1].split('/').map(Number)
+    return whole + (denominator ? numerator / denominator : 0)
+  }
+}
+
+// Format a number back to a fraction string
+const formatFraction = (num: number): string => {
+  if (!num) return ''
+
+  const whole = Math.floor(num)
+  const decimal = num - whole
+
+  // Common fractions and their decimal equivalents
+  const fractions: Record<number, string> = {
+    0.125: '⅛',
+    0.25: '¼',
+    0.333: '⅓',
+    0.5: '½',
+    0.666: '⅔',
+    0.75: '¾',
+    0.875: '⅞',
+  }
+
+  const fraction = fractions[Math.round(decimal * 1000) / 1000]
+
+  if (whole && fraction) {
+    return `${whole} ${fraction}`
+  } else if (fraction) {
+    return fraction
+  } else if (decimal > 0) {
+    // If no common fraction matches, show 2 decimal places
+    return num.toFixed(2)
+  }
+
+  return whole.toString()
 }
 
 const RecipeDetailsDialog = ({ isOpen, setIsOpen, recipe }: RecipeDetailsDialogProps) => {
@@ -69,10 +124,6 @@ const RecipeDetailsDialog = ({ isOpen, setIsOpen, recipe }: RecipeDetailsDialogP
   }
 
   if (!recipe) return null
-
-  useEffect(() => {
-    setServings(recipe.yield)
-  }, [recipe])
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -162,28 +213,27 @@ const RecipeDetailsDialog = ({ isOpen, setIsOpen, recipe }: RecipeDetailsDialogP
                 </Button>
               </Link>
             </div>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-6"
-              onClick={() => setServings(Math.max(recipe.yield, servings - 1))}
-              disabled={servings <= recipe.yield}
-            >
-              <Minus className="size-3" />
-            </Button>
-            <span className="w-8 text-center">{servings}</span>
-            <Button
-              variant="outline"
-              size="icon"
-              className="mr-1 size-6"
-              onClick={() => setServings(servings + 1)}
-            >
-              <Plus className="size-3" />
-            </Button>
-            <span className="text-sm text-muted-foreground">servings</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-6"
+                onClick={() => setServings(Math.max(1, servings - 1))}
+                disabled={servings <= 1}
+              >
+                <Minus className="size-3" />
+              </Button>
+              <span className="w-8 text-center">{servings}</span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="mr-1 size-6"
+                onClick={() => setServings(servings + 1)}
+              >
+                <Plus className="size-3" />
+              </Button>
+              <span className="text-sm text-muted-foreground">servings</span>
+            </div>
           </div>
         </DialogHeader>
 
@@ -191,15 +241,22 @@ const RecipeDetailsDialog = ({ isOpen, setIsOpen, recipe }: RecipeDetailsDialogP
           <div className="grid gap-4 pb-4">
             <div>
               <h3 className="mb-2 text-lg font-semibold">Ingredients</h3>
+
               <ul className="ml-4 list-disc space-y-2">
-                {recipe.ingredientLines.map((ingredient: string, index: number) => (
-                  <li key={index}>{ingredient}</li>
+                {recipe.ingredients.map((ingredient: any) => (
+                  <IngredientItem
+                    key={ingredient.foodId}
+                    ingredient={ingredient}
+                    servings={servings}
+                    recipeYield={recipe.yield}
+                  />
                 ))}
               </ul>
             </div>
 
-            <div>
-              <h3 className="mb-2 text-lg font-semibold">Nutrition (per serving)</h3>
+            <div className="mb-2 flex items-center justify-between gap-1">
+              <h3 className="text-lg font-semibold">Nutrition (per serving)</h3>
+
               <div className="xs:grid-cols-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {Object.entries(recipe.totalNutrients)
                   .filter(([_, value]: [string, any]) => value.quantity > 0)
@@ -246,6 +303,71 @@ const RecipeDetailsDialog = ({ isOpen, setIsOpen, recipe }: RecipeDetailsDialogP
       </DialogContent>
     </Dialog>
   )
+}
+
+// Separate component to handle ingredient text processing
+const IngredientItem = ({
+  ingredient,
+  servings,
+  recipeYield,
+}: {
+  ingredient: any
+  servings: number
+  recipeYield: number
+}) => {
+  const processedText = useMemo(() => {
+    const text = ingredient.text
+    if (!text) return text
+
+    // Simplified regex to find all numbers and fractions
+    const numberRegex = /(\d+\s*\/\s*\d+|\d+\s+\d+\/\d+|\d+\s*[¼½¾⅓⅔⅛⅜⅝⅞]?|¼|½|¾|⅓|⅔|⅛|⅜|⅝|⅞)/g
+    const parts = []
+    let lastIndex = 0
+    let match
+
+    // Use a counter to prevent potential infinite loops
+    let safetyCounter = 0
+    const MAX_ITERATIONS = 100
+
+    while ((match = numberRegex.exec(text)) !== null && safetyCounter < MAX_ITERATIONS) {
+      safetyCounter++
+      const [numberMatch] = match
+      const matchStart = match.index
+      const matchEnd = matchStart + numberMatch.length
+
+      // Add text before the number
+      if (matchStart > lastIndex) {
+        parts.push(text.substring(lastIndex, matchStart))
+      }
+
+      // Process and add the number
+      try {
+        const originalQuantity = parseFraction(numberMatch)
+        const scaledQuantity = (originalQuantity * servings) / (recipeYield || 1)
+        const displayQuantity = formatFraction(Math.round(scaledQuantity * 8) / 8)
+
+        parts.push(
+          <span key={`${ingredient.foodId}-${matchStart}`} className="font-medium">
+            {displayQuantity}
+          </span>,
+        )
+      } catch (e) {
+        // If parsing fails, just add the original text
+        parts.push(numberMatch)
+      }
+
+      lastIndex = matchEnd
+    }
+
+    // Add any remaining text
+    if (lastIndex < text.length) {
+      parts.push(text.substring(lastIndex))
+    }
+
+    return parts.length > 0 ? parts : text
+  }, [ingredient.text, servings, recipeYield, ingredient.foodId])
+
+  return <li>{processedText}</li>
 }
 
 export default RecipeDetailsDialog
