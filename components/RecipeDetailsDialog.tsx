@@ -120,7 +120,7 @@ const RecipeDetailsDialog = ({ isOpen, setIsOpen, recipe }: RecipeDetailsDialogP
                                 </Badge>
                             )}
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                     <Button variant="outline" size="sm" className="gap-2">

@@ -7,16 +7,29 @@ const GITHUB_HEADERS = {
 }
 
 const fetchJson = async (url: string) => {
-  const response = await fetch(url, {
-    headers: GITHUB_HEADERS,
-    next: {
-      revalidate: 45,
-    },
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to fetch from ${url}`)
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
+
+  try {
+    const response = await fetch(url, {
+      headers: GITHUB_HEADERS,
+      signal: controller.signal,
+      next: {
+        revalidate: 45,
+      },
+    })
+    if (!response.ok) {
+      throw new Error(`Failed to fetch from ${url}`)
+    }
+    return response.json()
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Request timeout for ${url}`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
   }
-  return response.json()
 }
 
 const fetchLatestRepoCommit = async ({ owner, repo }: { owner: string; repo: string }) => {

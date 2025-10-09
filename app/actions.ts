@@ -614,52 +614,76 @@ export async function getContractAddresses(): Promise<{ addresses: string[]; err
     }
 
     // Fetch fresh data if no cache or expired
-    const response = await fetch(
-      'https://api.github.com/repos/Cardano-Fans/crfa-offchain-data-registry/contents/dApps',
-      {
-        headers: {
-          Accept: 'application/vnd.github+json',
-        },
-      },
-    )
-    const files: any[] = await response.json()
-    const dAppFiles = files.filter((file: any) => file.name.endsWith('.json'))
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
 
-    const addresses = new Set<string>()
-
-    for (const file of dAppFiles) {
-      try {
-        const dAppRes = await fetch(
-          `https://raw.githubusercontent.com/Cardano-Fans/crfa-offchain-data-registry/main/dApps/${file.name}`,
-          {
-            headers: {
-              Accept: 'application/vnd.github.raw',
-            },
+    try {
+      const response = await fetch(
+        'https://api.github.com/repos/Cardano-Fans/crfa-offchain-data-registry/contents/dApps',
+        {
+          headers: {
+            Accept: 'application/vnd.github+json',
           },
-        )
-        const dAppData = await dAppRes.json()
+          signal: controller.signal,
+        },
+      )
 
-        dAppData.scripts?.forEach((script: any) => {
-          script.versions?.forEach((version: any) => {
-            if (version.contractAddress) {
-              addresses.add(version.contractAddress)
-            }
+      const files: any[] = await response.json()
+      const dAppFiles = files.filter((file: any) => file.name.endsWith('.json'))
+
+      const addresses = new Set<string>()
+
+      for (const file of dAppFiles) {
+        const dAppController = new AbortController()
+        const dAppTimeoutId = setTimeout(() => dAppController.abort(), 10000) // 10 second timeout for individual files
+
+        try {
+          const dAppRes = await fetch(
+            `https://raw.githubusercontent.com/Cardano-Fans/crfa-offchain-data-registry/main/dApps/${file.name}`,
+            {
+              headers: {
+                Accept: 'application/vnd.github.raw',
+              },
+              signal: dAppController.signal,
+            },
+          )
+
+          const dAppData = await dAppRes.json()
+
+          dAppData.scripts?.forEach((script: any) => {
+            script.versions?.forEach((version: any) => {
+              if (version.contractAddress) {
+                addresses.add(version.contractAddress)
+              }
+            })
           })
-        })
-      } catch (error) {
-        console.error(`Error processing ${file.name}:`, error)
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            console.error(`Timeout processing ${file.name}`)
+          } else {
+            console.error(`Error processing ${file.name}:`, error)
+          }
+        } finally {
+          clearTimeout(dAppTimeoutId)
+        }
       }
-    }
 
-    // Cache the new data
-    const cacheData: CacheData = {
-      addresses: Array.from(addresses),
-      timestamp: Date.now(),
-    }
-    await kv.set('contract-addresses', cacheData, { ex: CACHE_DURATION / 1000 })
+      // Cache the new data
+      const cacheData: CacheData = {
+        addresses: Array.from(addresses),
+        timestamp: Date.now(),
+      }
+      await kv.set('contract-addresses', cacheData, { ex: CACHE_DURATION / 1000 })
 
-    return { addresses: Array.from(addresses) }
+      return { addresses: Array.from(addresses) }
+    } finally {
+      clearTimeout(timeoutId)
+    }
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error('Timeout fetching GitHub data')
+      return { addresses: [], error: 'Request timeout' }
+    }
     console.error('Error fetching blacklist:', error)
     return { addresses: [], error: 'Failed to fetch contract addresses' }
   }
@@ -673,15 +697,32 @@ export const fetchAddressesFromPolicy = async (policyId: string, network: string
     fetchUrl = `https://api.koios.rest/api/v1/policy_asset_addresses?_asset_policy=${policyId}`
   }
 
-  const response = await fetch(fetchUrl, {
-    headers: {
-      accept: 'application/json',
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
 
-      authorization: `Bearer ${process.env.KOIOS_BEARER_TOKEN}`,
-    },
-  })
-  const data = await response.json()
-  return data
+  try {
+    const response = await fetch(fetchUrl, {
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${process.env.KOIOS_BEARER_TOKEN}`,
+      },
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return data
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Request timeout')
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 export async function storeWebhookIdInVercelKV(

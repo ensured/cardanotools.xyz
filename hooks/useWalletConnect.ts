@@ -96,18 +96,27 @@ export function useWalletConnect() {
   // Check for wallet account changes
   useEffect(() => {
     if (!walletState.api) return
-
     let isChecking = false
+
     const checkWalletState = async () => {
       if (isChecking) return
-
       try {
         isChecking = true
         const api = walletState.api
 
         // Get stake address first
         const stakeAddresses = await api.getRewardAddresses()
+
+        if (!stakeAddresses || !Array.isArray(stakeAddresses) || stakeAddresses.length === 0) {
+          console.error('No stake addresses available from wallet')
+          return
+        }
+
         const decodedStakeAddr = decodeHexAddress(stakeAddresses[0])
+        if (!decodedStakeAddr) {
+          console.error('Failed to decode stake address')
+          return
+        }
 
         // Only proceed if stake address has changed
         if (decodedStakeAddr !== walletState.stakeAddress) {
@@ -155,17 +164,21 @@ export function useWalletConnect() {
 
   const decodeHexAddress = (hexAddress: string): string => {
     try {
+      // Validate that we have a proper hex string
+      if (!hexAddress || typeof hexAddress !== 'string' || !/^[0-9a-fA-F]+$/.test(hexAddress)) {
+        console.error('Invalid hex address format:', hexAddress)
+        return ''
+      }
+
       const bytes = new Uint8Array(Buffer.from(hexAddress, 'hex'))
       const address = Address.from_bytes(bytes)
       const baseAddress = BaseAddress.from_address(address)
       return baseAddress ? baseAddress.to_address().to_bech32() : address.to_bech32()
     } catch (error) {
       console.error('Error decoding address:', error)
-      return hexAddress
+      return ''
     }
   }
-
-  
 
   const updateWalletState = (newState: Partial<WalletState>, dispatchEvent: boolean = true) => {
     const updatedState = { ...walletState, ...newState }
@@ -199,25 +212,40 @@ export function useWalletConnect() {
   }
 
   const getWalletDetails = async (api: any) => {
-    // Get addresses
-    const walletAddresses = await api.getUsedAddresses()
-    const unusedAddresses = await api.getUnusedAddresses()
-    const primaryAddress = walletAddresses.length > 0 ? walletAddresses[0] : unusedAddresses[0]
+    try {
+      // Get addresses
+      const walletAddresses = await api.getUsedAddresses()
+      const unusedAddresses = await api.getUnusedAddresses()
 
-    const decodedAddress = decodeHexAddress(primaryAddress)
+      // Validate that we got proper address arrays
+      if (!Array.isArray(walletAddresses) || !Array.isArray(unusedAddresses)) {
+        throw new Error('Invalid address format from wallet API')
+      }
 
-    if (!decodedAddress) throw new Error('No address found')
+      const primaryAddress = walletAddresses.length > 0 ? walletAddresses[0] : unusedAddresses[0]
 
-    // Get balance
-    const balanceResponse = await api.getBalance()
-    const balanceBytes = Buffer.from(balanceResponse, 'hex')
-    const decodedBalance = Number(
-      (cborDecode(new Uint8Array(balanceBytes).buffer)[0] / 1000000).toFixed(0),
-    )
+      if (!primaryAddress) {
+        throw new Error('No addresses available from wallet')
+      }
 
-    return {
-      address: decodedAddress,
-      balance: isNaN(decodedBalance) ? 0 : decodedBalance,
+      const decodedAddress = decodeHexAddress(primaryAddress)
+
+      if (!decodedAddress) throw new Error('Failed to decode wallet address')
+
+      // Get balance
+      const balanceResponse = await api.getBalance()
+      const balanceBytes = Buffer.from(balanceResponse, 'hex')
+      const decodedBalance = Number(
+        (cborDecode(new Uint8Array(balanceBytes).buffer)[0] / 1000000).toFixed(0),
+      )
+
+      return {
+        address: decodedAddress,
+        balance: isNaN(decodedBalance) ? 0 : decodedBalance,
+      }
+    } catch (error) {
+      console.error('Error getting wallet details:', error)
+      throw error
     }
   }
 
@@ -244,7 +272,14 @@ export function useWalletConnect() {
       ])
 
       // Get stake address and handle for initial connection
+      if (!stakeAddress || !Array.isArray(stakeAddress) || stakeAddress.length === 0) {
+        throw new Error('No stake addresses available from wallet')
+      }
+
       const decodedStakeAddr = decodeHexAddress(stakeAddress[0])
+      if (!decodedStakeAddr) {
+        throw new Error('Failed to decode stake address')
+      }
 
       const baseWalletState = {
         ...initialWalletState,
@@ -289,8 +324,14 @@ export function useWalletConnect() {
   }
 
   const getAdaHandle = async (stakeAddress: string, networkId: number) => {
+    // Validate stake address before making API call
+    if (!stakeAddress || stakeAddress.length < 10) {
+      console.error('Invalid stake address for handle lookup:', stakeAddress)
+      return { default_handle: null, total_handles: null }
+    }
+
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 3000) // 3 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 10000) // Increase timeout to 10 seconds
 
     try {
       const res = await fetch(
@@ -301,8 +342,12 @@ export function useWalletConnect() {
       )
 
       if (!res.ok) {
-        if (res.status === 504) {
+        if (res.status === 404) {
+          console.log('No handle found for stake address:', stakeAddress)
+        } else if (res.status === 504) {
           toast.error('adahandle API is currently unavailable')
+        } else {
+          console.error('Handle API error:', res.status, res.statusText)
         }
         return { default_handle: null, total_handles: null }
       }
