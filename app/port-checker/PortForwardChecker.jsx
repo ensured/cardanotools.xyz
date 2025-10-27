@@ -1,15 +1,15 @@
-"use client"
+'use client'
 
-import { useEffect, useRef, useState } from "react"
-import axios from "axios"
+import { useEffect, useRef, useState } from 'react'
+import axios from 'axios'
 
-import { Button } from "@/components/ui/button"
-import { Form } from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
+import { Button } from '@/components/ui/button'
+import { Form } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
 
 function PortForwardChecker({ usersIp }) {
-  const [ip, setIp] = useState(usersIp || "")
-  const [port, setPort] = useState("")
+  const [ip, setIp] = useState(usersIp || '')
+  const [port, setPort] = useState('')
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -17,7 +17,7 @@ function PortForwardChecker({ usersIp }) {
   const [showHistory, setShowHistory] = useState(false)
 
   const inputRef = useRef(null)
-  const historyKey = "portHistory"
+  const historyKey = 'portHistory'
 
   // Load port history from localStorage when the component mounts
   useEffect(() => {
@@ -44,9 +44,9 @@ function PortForwardChecker({ usersIp }) {
   }
 
   useEffect(() => {
-    document.addEventListener("mousedown", handleClickOutside)
+    document.addEventListener('mousedown', handleClickOutside)
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
+      document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [])
 
@@ -58,13 +58,13 @@ function PortForwardChecker({ usersIp }) {
     setLoading(true)
 
     try {
-      const response = await axios.get("/api/ping", {
+      const response = await axios.get('/api/ping', {
         params: { ip, port },
       })
       setResult(response.data.message)
       saveToHistory(port) // Save port to history on successful submit
     } catch (err) {
-      setError(err.response?.data?.message || "Error checking port")
+      setError(err.response?.data?.message || 'Error checking port')
     }
 
     setLoading(false)
@@ -89,7 +89,7 @@ function PortForwardChecker({ usersIp }) {
             id="ip"
             placeholder="69.69.69.69"
             value={ip === usersIp ? usersIp : ip}
-            autoComplete={"true"}
+            autoComplete={'true'}
             onChange={(e) => setIp(e.target.value)}
           />
           <br />
@@ -99,8 +99,8 @@ function PortForwardChecker({ usersIp }) {
             <Input
               type="number"
               id="port"
-              placeholder={"1024"}
-              autoComplete={"true"}
+              placeholder={'1024'}
+              autoComplete={'true'}
               value={port}
               onChange={(e) => setPort(e.target.value)}
               onFocus={() => setShowHistory(true)} // Show history when focused
@@ -127,31 +127,27 @@ function PortForwardChecker({ usersIp }) {
           <div className="h-6">
             {result && (
               <p>
-                {result.includes("Port is open") && (
+                {result.includes('Port is open') && (
                   <>
                     Port is <b className="text-green">open</b>
                   </>
                 )}
-                {result.includes("Port is closed") && (
+                {result.includes('Port is closed') && (
                   <>
                     Port is <b className="text-red-600 opacity-90">closed</b>
                   </>
                 )}
-                {result.includes("Error checking port") && (
+                {result.includes('Error checking port') && (
                   <>
-                    <b className="text-red-600 opacity-90">
-                      Error checking port
-                    </b>
+                    <b className="text-red-600 opacity-90">Error checking port</b>
                   </>
                 )}
-                {result.includes("Connection timed out") && (
+                {result.includes('Connection timed out') && (
                   <>
-                    <b className="text-red-600 opacity-90">
-                      Connection timed out
-                    </b>
+                    <b className="text-red-600 opacity-90">Connection timed out</b>
                   </>
                 )}
-                {result.includes("Invalid IP") && (
+                {result.includes('Invalid IP') && (
                   <>
                     <b className="text-red-600 opacity-90">Invalid IP</b>
                   </>
@@ -163,11 +159,10 @@ function PortForwardChecker({ usersIp }) {
 
           <Button
             className="relative flex w-full items-center justify-center" // Add flexbox styles
-            variant={"moon"}
             type="submit"
             disabled={loading}
           >
-            {!loading && "Check Port"}
+            {!loading && 'Check Port'}
             {loading && (
               <>
                 <span>Loading...</span>
