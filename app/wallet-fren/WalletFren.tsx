@@ -236,7 +236,7 @@ const InstructionsList = () => (
       <Link href="https://blockfrost.io/dashboard/webhooks/add" target="_blank">
         <Button variant="ghost" className="group flex items-center gap-2 px-2 text-lg font-medium">
           <LucideLinkIcon className="h-5 w-5 text-primary transition-transform group-hover:-rotate-12" />
-          <span className="whitespace-pre-wrap bg-gradient-to-r from-indigo-300 to-purple-200 bg-clip-text text-left text-transparent">
+          <span className="whitespace-pre-wrap bg-gradient-to-r from-indigo-600 to-purple-500 bg-clip-text text-left text-transparent dark:from-indigo-300 dark:to-purple-200">
             Blockfrost <br className="hidden sm:inline" />
             Webhooks
           </span>
