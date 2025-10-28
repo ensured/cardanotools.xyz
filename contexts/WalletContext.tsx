@@ -10,6 +10,7 @@ export type WalletContextType = {
   disconnect: () => void
   getSupportedWallets: () => string[]
   network: number | null
+  updateDefaultHandle: (handleName: string) => void
 }
 
 // Create context with the correct type
@@ -30,6 +31,23 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  const updateDefaultHandle = (handleName: string) => {
+    const updatedHandles = wallet.walletState.adaHandle.allHandles?.map(h => ({
+      ...h,
+      isDefault: h.name === handleName
+    })) || [];
+    
+    // Update the wallet state using the updateWalletState function
+    wallet.updateWalletState({
+      ...wallet.walletState,
+      adaHandle: {
+        ...wallet.walletState.adaHandle,
+        handle: handleName,
+        allHandles: updatedHandles
+      }
+    });
+  };
+
   const contextValue = {
     walletState: wallet.walletState,
     loading: wallet.loading,
@@ -37,6 +55,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     disconnect: wallet.disconnect,
     getSupportedWallets: wallet.getSupportedWallets,
     network: wallet.walletState.network,
+    updateDefaultHandle
   }
 
   return <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>

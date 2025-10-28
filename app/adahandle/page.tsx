@@ -5,7 +5,6 @@ import ResolveHandleForm from '@/components/ResolveHandleForm'
 import { useState, useEffect } from 'react'
 import { getAddressFromHandle } from '../actions'
 import { useWallet } from '@/contexts/WalletContext'
-import Chat from '@/components/Chat'
 
 const Page = () => {
   const [handleName, setHandleName] = useState('')
@@ -99,7 +98,6 @@ const Page = () => {
           </div>
         </div>
         */}
-        
       </div>
     </Animation>
   )

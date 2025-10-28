@@ -16,6 +16,7 @@ export interface WalletState {
   adaHandle: {
     handle: string | null
     total_handles: number | null
+    allHandles: any[] | null
   }
   stakeAddress: string | null
   balance: number | null
@@ -34,6 +35,7 @@ const initialWalletState: WalletState = {
   adaHandle: {
     handle: null,
     total_handles: null,
+    allHandles: null,
   },
   stakeAddress: null,
   balance: null,
@@ -84,7 +86,6 @@ export const signData = async (api: any, address: string, stakeAddress: string) 
 export function useWalletConnect() {
   const [walletState, setWalletState] = useState<WalletState>(initialWalletState)
   const [loading, setLoading] = useState(false)
-
   // Auto-connect to last used wallet on page load
   useEffect(() => {
     const lastWallet = localStorage.getItem('lastWallet')
@@ -195,20 +196,27 @@ export function useWalletConnect() {
     stakeAddress: string,
     networkId: number,
   ) => {
-    let handleData = null
     try {
-      handleData = await getAdaHandle(stakeAddress, networkId)
+      const { handles, defaultHandle } = await getAdaHandle(stakeAddress, networkId)
+      return updateWalletState({
+        ...currentState,
+        adaHandle: {
+          handle: defaultHandle,
+          total_handles: handles?.length,
+          allHandles: handles,
+        },
+      })
     } catch (error) {
       console.error('Error fetching AdaHandle:', error)
+      return updateWalletState({
+        ...currentState,
+        adaHandle: {
+          handle: null,
+          total_handles: null,
+          allHandles: null,
+        },
+      })
     }
-
-    return updateWalletState({
-      ...currentState,
-      adaHandle: {
-        handle: handleData?.default_handle,
-        total_handles: handleData?.total_handles,
-      },
-    })
   }
 
   const getWalletDetails = async (api: any) => {
@@ -306,6 +314,24 @@ export function useWalletConnect() {
     }
   }
 
+  const updateDefaultHandle = (handleName: string) => {
+    const updatedHandles =
+      walletState.adaHandle.allHandles?.map((h) => ({
+        ...h,
+        isDefault: h.name === handleName,
+      })) || []
+
+    // Update the wallet state using the updateWalletState function
+    updateWalletState({
+      ...walletState,
+      adaHandle: {
+        ...walletState.adaHandle,
+        handle: handleName,
+        allHandles: updatedHandles,
+      },
+    })
+  }
+
   const disconnect = () => {
     localStorage.removeItem('lastWallet')
     updateWalletState(initialWalletState)
@@ -375,5 +401,7 @@ export function useWalletConnect() {
     disconnect,
     getSupportedWallets,
     network: walletState.network,
+    updateDefaultHandle,
+    updateWalletState,
   }
 }
