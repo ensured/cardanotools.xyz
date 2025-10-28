@@ -187,24 +187,43 @@
   background-color: var(--scrollbar-thumb-active) !important;
 } */
 /* Define scrollbar track */
-/* Hide scrollbar */
-::-webkit-scrollbar {
-  display: none;
+/* Scrollbar styles for RecipeDetailsDialog */
+.recipe-dialog-scrollable {
+  --scrollbar-track: rgba(0, 0, 0, 0.1);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
-/* Hide scrollbar thumb */
-::-webkit-scrollbar-thumb {
-  display: none;
+.recipe-dialog-scrollable::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  display: block !important;
 }
 
-/* Hide scrollbar track */
-::-webkit-scrollbar-track {
-  display: none;
+.recipe-dialog-scrollable::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
-/* Hide scrollbar corner */
-::-webkit-scrollbar-corner {
-  display: none;
+.recipe-dialog-scrollable::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+.recipe-dialog-scrollable::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 4px;
+  margin: 4px 0;
+}
+
+/* Dark mode support */
+.dark .recipe-dialog-scrollable {
+  --scrollbar-track: rgba(255, 255, 255, 0.1);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
 }
 .react-pdf__Page__textContent {
   border-radius: 6px;

@@ -127,7 +127,7 @@ const RecipeDetailsDialog = ({ isOpen, setIsOpen, recipe }: RecipeDetailsDialogP
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="max-h-[100vh] max-w-2xl">
+      <DialogContent className="max-h-[100vh] max-w-4xl overflow-auto">
         <DialogHeader>
           <VisuallyHidden>
             <DialogDescription>gg</DialogDescription>
@@ -237,15 +237,15 @@ const RecipeDetailsDialog = ({ isOpen, setIsOpen, recipe }: RecipeDetailsDialogP
           </div>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[calc(60vh-4rem)] w-full pr-4">
+        <ScrollArea className="recipe-dialog-scrollable max-h-[calc(60vh-4rem)] w-full pr-4 overflow-auto">
           <div className="grid gap-4 pb-4">
             <div>
               <h3 className="mb-2 text-lg font-semibold">Ingredients</h3>
 
               <ul className="ml-4 list-disc space-y-2">
-                {recipe.ingredients.map((ingredient: any) => (
+                {recipe.ingredients.map((ingredient: any, index: number) => (
                   <IngredientItem
-                    key={ingredient.foodId}
+                    key={`${ingredient.foodId}-${index}`}
                     ingredient={ingredient}
                     servings={servings}
                     recipeYield={recipe.yield}
@@ -254,9 +254,8 @@ const RecipeDetailsDialog = ({ isOpen, setIsOpen, recipe }: RecipeDetailsDialogP
               </ul>
             </div>
 
-            <div className="mb-2 flex items-center justify-between gap-1">
-              <h3 className="text-lg font-semibold">Nutrition (per serving)</h3>
-
+            <div className="mb-2 flex flex-col gap-4">
+              <h3 className="text-xl font-semibold">Nutrition (per serving)</h3>
               <div className="xs:grid-cols-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {Object.entries(recipe.totalNutrients)
                   .filter(([_, value]: [string, any]) => value.quantity > 0)
