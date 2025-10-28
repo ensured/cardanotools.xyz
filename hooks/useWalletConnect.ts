@@ -95,7 +95,7 @@ export function useWalletConnect() {
 
   // Check for wallet account changes
   useEffect(() => {
-    if (!walletState.api) return
+    if (!walletState.api || !walletState.wallet) return
     let isChecking = false
 
     const checkWalletState = async () => {
