@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Explicitly set the root directory for file tracing to the current project
+  outputFileTracingRoot: process.cwd(),
   webpack: (config, { isServer }) => {
     config.resolve.alias.canvas = false
 
