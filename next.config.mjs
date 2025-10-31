@@ -1,23 +1,16 @@
-/** @type {import('next').NextConfig} */
-module.exports = {
-  webpack: (config, { isServer }) => {
-    config.resolve.alias.canvas = false
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-    // Set browser target for client only (enables JSONP chunks)
-    if (!isServer) {
-      config.target = 'web'
-      // Enable modern JS features for client (suppresses async/await warnings in WASM glue)
-      config.output.environment = {
-        ...config.output.environment,
-        arrowFunction: true,
-        const: true,
-        destructuring: true,
-        forOf: true,
-        dynamicImport: true,
-        module: true,
-        asyncFunction: true, // Enables native async/await (corrected prop name)
-      }
-    }
+// Create __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  // Configure output file tracing root to point to the project directory
+  outputFileTracingRoot: path.join(__dirname),
+  webpack: (config, { isServer }) => {
+    config.resolve.alias.canvas = false;
 
     // Add WASM support
     config.experiments = {
@@ -25,20 +18,19 @@ module.exports = {
       asyncWebAssembly: true,
       topLevelAwait: true,
       layers: true,
-    }
+    };
 
     config.module.rules.push({
       test: /\.wasm$/,
       type: 'webassembly/async',
-    })
+    });
 
     // Important: Mark WASM files as async chunks
     config.output.webassemblyModuleFilename =
-      (isServer ? '../' : '') + 'static/wasm/[modulehash].wasm'
+      (isServer ? '../' : '') + 'static/wasm/[modulehash].wasm';
 
     return config
   },
-
   // Add transpilation for problematic packages
   transpilePackages: ['@emurgo/cardano-serialization-lib-asmjs'],
   // Disable server-side rendering for WASM-dependent features
@@ -109,3 +101,4 @@ module.exports = {
   reactStrictMode: false,
 }
 
+export default nextConfig

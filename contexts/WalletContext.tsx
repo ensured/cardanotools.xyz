@@ -20,6 +20,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const wallet = useWalletConnect()
 
   useEffect(() => {
+    // Skip if window is not available (SSR)
+    if (typeof window === 'undefined') return
+
     const handleWalletStateChange = (event: CustomEvent<WalletState>) => {
       wallet.walletState = event.detail
     }
@@ -32,21 +35,22 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const updateDefaultHandle = (handleName: string) => {
-    const updatedHandles = wallet.walletState.adaHandle.allHandles?.map(h => ({
-      ...h,
-      isDefault: h.name === handleName
-    })) || [];
-    
+    const updatedHandles =
+      wallet.walletState.adaHandle.allHandles?.map((h) => ({
+        ...h,
+        isDefault: h.name === handleName,
+      })) || []
+
     // Update the wallet state using the updateWalletState function
     wallet.updateWalletState({
       ...wallet.walletState,
       adaHandle: {
         ...wallet.walletState.adaHandle,
         handle: handleName,
-        allHandles: updatedHandles
-      }
-    });
-  };
+        allHandles: updatedHandles,
+      },
+    })
+  }
 
   const contextValue = {
     walletState: wallet.walletState,
@@ -55,7 +59,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     disconnect: wallet.disconnect,
     getSupportedWallets: wallet.getSupportedWallets,
     network: wallet.walletState.network,
-    updateDefaultHandle
+    updateDefaultHandle,
   }
 
   return <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>

@@ -64,7 +64,7 @@ export function AdaHandlesDialog({ open, onOpenChange }: AdaHandlesDialogProps) 
                       </span>
                     )}
                     <span className="text-sm text-muted-foreground">
-                      {isCurrent ? 'Current' : 'Set as default'}
+                      {isCurrent ? 'Current' : ''}
                     </span>
                   </div>
                 </button>
