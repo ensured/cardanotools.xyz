@@ -110,11 +110,11 @@ function PortForwardChecker({ usersIp }) {
 
             {/* Port history dropdown */}
             {showHistory && portHistory.length > 0 && (
-              <ul className="absolute z-10 max-h-40 w-full overflow-auto border border-gray-300 bg-white">
+              <ul className="absolute z-10 max-h-40 w-full overflow-auto border border-border/50 bg-background text-foreground">
                 {portHistory.map((item, index) => (
                   <li
                     key={index}
-                    className="cursor-pointer p-2 hover:bg-gray-100"
+                    className="cursor-pointer p-2 hover:bg-border/50"
                     onClick={() => handleSelectHistory(item)}
                   >
                     {item}

@@ -185,7 +185,7 @@ export function useWalletConnect() {
     let handleData = null
     try {
       handleData = await getAdaHandle(stakeAddress, networkId)
-      console.log(handleData)
+      console.log(handleData.defaultHandle)
     } catch (error) {
       console.error('Error fetching AdaHandle:', error)
     }
