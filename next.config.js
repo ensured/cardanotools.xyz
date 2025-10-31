@@ -1,7 +1,5 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  // Explicitly set the root directory for file tracing to the current project
-  outputFileTracingRoot: process.cwd(),
+module.exports = {
   webpack: (config, { isServer }) => {
     config.resolve.alias.canvas = false
 
@@ -40,6 +38,7 @@ const nextConfig = {
 
     return config
   },
+
   // Add transpilation for problematic packages
   transpilePackages: ['@emurgo/cardano-serialization-lib-asmjs'],
   // Disable server-side rendering for WASM-dependent features
@@ -110,4 +109,3 @@ const nextConfig = {
   reactStrictMode: false,
 }
 
-export default nextConfig
