@@ -24,7 +24,7 @@ export function AdaHandlesDialog({ open, onOpenChange }: AdaHandlesDialogProps) 
 
   const handleUpdateDefaultHandle = async (handleName: string) => {
     try {
-      await updateDefaultHandle(handleName)
+      updateDefaultHandle(handleName)
       // Close the dialog after a short delay
       setTimeout(() => onOpenChange(false), 300)
     } catch (error) {
