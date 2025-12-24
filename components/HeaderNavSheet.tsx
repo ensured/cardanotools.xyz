@@ -11,41 +11,32 @@ import {
   Monitor,
   UtensilsCrossed,
   Network,
-  Loader2,
   ShoppingCart,
   FileKey,
   Send,
   Wallet,
-  Bot,
 } from 'lucide-react'
-import { useCommits } from './CommitContext'
-import { timeAgo } from '@/utils/timeAgo'
-import { Skeleton } from './ui/skeleton'
 import {
   Dialog,
   DialogContent,
   DialogTrigger,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
-  DialogClose,
 } from './ui/dialog'
 import { useEffect } from 'react'
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden'
-import { Card, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { useWindowWidth } from '@wojtekmaj/react-hooks'
 
 import { SheetContent } from './SheetContent'
 import { ThemeToggle } from './theme-toggle'
 import { Button } from './ui/button'
 import { Sheet, SheetDescription, SheetTitle, SheetTrigger } from './ui/sheet'
-import { timeAgoCompact } from '../lib/helper'
 import { Separator } from './ui/separator'
 import CardanoDonationDialog from './cardano-donation-dialog'
 import { useTheme } from 'next-themes'
 import { DiscordLogoIcon } from '@radix-ui/react-icons'
+
 export function HeaderNavSheet() {
-  const { folderCommits, latestRepoCommit, loading, error } = useCommits()
   const { theme } = useTheme()
 
   const [isSheetOpen, setIsSheetOpen] = useState(false)
@@ -55,120 +46,15 @@ export function HeaderNavSheet() {
   }
 
   const width = useWindowWidth()
-  // New state to hold the current time
   const [currentTime, setCurrentTime] = useState(Date.now())
 
-  // Effect to update current time every minute
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentTime(Date.now())
-    }, 1000) // Update client-side currentTime state every second
+    }, 1000)
 
-    return () => clearInterval(interval) // Cleanup on unmount
+    return () => clearInterval(interval)
   }, [])
-
-  // Function to interpolate color based on time difference
-  const getColor = (date: any) => {
-    const commitTime = date ? new Date(date) : new Date() // Fallback to current date if date is invalid
-    const timeDiff = (currentTime - commitTime.getTime()) / 1000 // Use currentTime for difference
-
-    // Define the maximum time for color mapping (1 year in seconds)
-    const maxTime = 365 * 24 * 60 * 60 // 1 year in seconds
-
-    // Normalize timeDiff to a value between 0 and 1
-    const normalized = Math.min(timeDiff / maxTime, 1)
-
-    // Interpolate between green (0) and red (1)
-    const r = Math.floor(255 * normalized) // Red increases with time
-    const g = Math.floor(255 * (1 - normalized)) // Green decreases with time
-    const b = 0 // Keep blue constant
-
-    return `rgb(${r}, ${g}, ${b})` // Return the RGB color
-  }
-
-  const latestCommit = () => {
-    return loading ? (
-      <Skeleton className="flex items-center justify-center" />
-    ) : (
-      <span className="text-sm text-muted-foreground">
-        {latestRepoCommit[0]?.date ? (
-          <Dialog>
-            <DialogTrigger>
-              <div className="flex w-full items-center gap-x-1 rounded-md px-2 hover:bg-secondary">
-                <div
-                  className="size-3.5 shrink-0 rounded-full opacity-60 dark:opacity-[69%]"
-                  style={{
-                    backgroundColor: getColor(latestRepoCommit[0]?.date),
-                  }}
-                />
-                <div className="text-xs tracking-tighter">
-                  ({timeAgo(latestRepoCommit[0]?.date)})
-                </div>
-                <div className="flex cursor-pointer items-center gap-x-2 overflow-x-auto rounded-md bg-transparent p-1.5 px-0.5 font-mono">
-                  <div className="line-clamp-1 max-w-[200px] text-left text-xs tracking-tighter md:max-w-[269px]">
-                    {latestRepoCommit[0]?.message}
-                  </div>
-                </div>
-              </div>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogDescription>
-                <VisuallyHidden>yeet</VisuallyHidden>
-              </DialogDescription>
-              <DialogTitle>
-                <VisuallyHidden>yeet</VisuallyHidden>
-              </DialogTitle>
-
-              <Card className="mx-5 flex flex-col rounded-lg border-none bg-background shadow-lg transition-shadow duration-200 hover:shadow-xl">
-                <div className="m-1 flex w-full flex-row items-center gap-1 break-all">
-                  <CardTitle className="rounded-lg bg-secondary/20 p-4 font-mono text-xl font-semibold tracking-tight text-muted-foreground">
-                    {latestRepoCommit[0]?.message || 'No commit message available.'}
-                  </CardTitle>
-                </div>
-                <CardContent className="flex flex-col gap-1 p-1">
-                  <div className="flex flex-row gap-1">
-                    <div className="flex flex-row gap-2">
-                      <Button variant={'outline'} className="text-xs sm:text-sm" size={'sm'}>
-                        <Link
-                          href={`https://github.com/ensured/${latestRepoCommit[0]?.repo}/commit/${latestRepoCommit[0]?.hash}`}
-                          target="_blank"
-                        >
-                          View Commit
-                        </Link>
-                      </Button>
-                      <Button variant={'outline'} className="text-xs sm:text-sm" size={'sm'}>
-                        <Link
-                          href={`https://github.com/ensured/${latestRepoCommit[0]?.repo}`}
-                          target="_blank"
-                        >
-                          Visit Repository
-                        </Link>
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <CardDescription className="flex justify-end">
-                {timeAgo(latestRepoCommit[0]?.date) + ' ago' || 'No date available.'}
-              </CardDescription>
-              {/* <DialogFooter className="relative px-7">
-                <DialogClose
-                  asChild
-                  className="mx-auto flex w-full justify-center"
-                >
-                  <Button variant="ghost" className="border border-border/40">
-                    Close
-                  </Button>
-                </DialogClose>
-              </DialogFooter> */}
-            </DialogContent>
-          </Dialog>
-        ) : (
-          ''
-        )}
-      </span>
-    )
-  }
 
   return (
     <Sheet key={'left'} open={isSheetOpen} onOpenChange={handleOpenChange}>
@@ -186,16 +72,6 @@ export function HeaderNavSheet() {
       <SheetContent className="p-3">
         <div className="flex w-full flex-row">
           <ThemeToggle />
-          <div className="flex w-4/5 flex-col items-center justify-center">
-            {error && (
-              <span className="text-sm text-gray-500">
-                <span className="text-red-500">{error}</span>
-              </span>
-            )}
-            {loading && <Loader2 className="animate-spin" />}
-            {latestCommit()}
-            {error && <div className="text-xs text-red-500">{error}</div>}
-          </div>
         </div>
 
         <VisuallyHidden>
@@ -225,15 +101,6 @@ export function HeaderNavSheet() {
             </div>
 
             <CustomLinkText>NFT Minter</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'nft-minter') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'nft-minter')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
 
           <CustomLink href={'/airdropper'} onClick={handleOpenChange} target={false}>
@@ -244,15 +111,6 @@ export function HeaderNavSheet() {
             </div>
 
             <CustomLinkText>Airdrop Tool</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'airdropper') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'airdropper')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
 
           <CustomLink href={'/wallet-fren'} onClick={handleOpenChange} target={false}>
@@ -263,15 +121,6 @@ export function HeaderNavSheet() {
             </div>
 
             <CustomLinkText>Wallet Tracker</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'wallet-fren') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'wallet-fren')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
 
           <CustomLink href={'/generateSeed'} onClick={handleOpenChange} target={false}>
@@ -282,22 +131,12 @@ export function HeaderNavSheet() {
             </div>
 
             <CustomLinkText>Generate Seed</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'generateSeed') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'generateSeed')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
 
           <CustomLink href={'/adahandle'} onClick={handleOpenChange} target={false}>
             <div className="flex">
               <h1 className="flex items-center text-lg no-underline">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="22" viewBox="0 0 22 32">
-                  {/* min-x min-y width height */}
                   <path
                     id="logo_S"
                     data-name="logo S"
@@ -309,53 +148,19 @@ export function HeaderNavSheet() {
             </div>
 
             <CustomLinkText>Handle Checker</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'adahandle') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'adahandle')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
 
           <CustomLink href="/punycode" onClick={handleOpenChange}>
             <Globe className="size-5 min-h-[24px] min-w-[24px]" />
             <CustomLinkText>Punycode Converter</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'punycode') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(folderCommits.find((c) => c.folder === 'punycode')?.lastCommitDate)}
-                )
-              </span>
-            )}
           </CustomLink>
           <CustomLink href="/cardano-links" onClick={handleOpenChange}>
             <LinkIcon className="size-5 min-h-[24px] min-w-[24px]" />
             <CustomLinkText>Cardano Links</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'cardano-links') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'cardano-links')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
           <CustomLink href="/crypto-tracker" onClick={handleOpenChange}>
             <LineChart className="size-5 min-h-[24px] min-w-[24px]" />
             <CustomLinkText>Crypto Tracker</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'crypto-tracker') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'crypto-tracker')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
 
           <div className="flex items-center gap-1.5 py-2 text-xl font-semibold text-[hsl(275,70%,60%)] dark:text-[hsl(276,70%,60%)]">
@@ -372,32 +177,11 @@ export function HeaderNavSheet() {
 
           </CustomLink>
 
-          <CustomLink
-            href={'https://github.com/ensured/phone-backup-app-android'}
-            onClick={handleOpenChange}
-            target={true}
-          >
-            <Smartphone className="size-5 min-h-[24px] min-w-[24px]" />
-            <CustomLinkText>Android Fren</CustomLinkText>
-            {latestRepoCommit[1] && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                ({timeAgoCompact(latestRepoCommit[1].date)})
-              </span>
-            )}
-          </CustomLink>
+
 
           <CustomLink href="/tradingview-script" onClick={handleOpenChange}>
             <Monitor className="size-5 min-h-[24px] min-w-[24px]" />
             <CustomLinkText>TradingView Adblocker</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'tradingview-script') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'tradingview-script')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
 
           <div className="py-2 text-xl font-semibold text-[hsl(275,70%,60%)] dark:text-[hsl(276,70%,60%)]">
@@ -406,43 +190,16 @@ export function HeaderNavSheet() {
           <CustomLink href="/recipe-fren" onClick={handleOpenChange}>
             <UtensilsCrossed className="size-5 min-h-[24px] min-w-[24px]" />
             <CustomLinkText>Recipe Fren</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'recipe-fren') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'recipe-fren')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
 
           <CustomLink href="/shopping-list" onClick={handleOpenChange}>
             <ShoppingCart className="size-5 min-h-[24px] min-w-[24px]" />
             <CustomLinkText>Shopping List</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'shopping-list') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'shopping-list')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
 
           <CustomLink href="/port-checker" onClick={handleOpenChange}>
             <Network className="size-5 min-h-[24px] min-w-[24px]" />
             <CustomLinkText>Port Checker</CustomLinkText>
-            {folderCommits.find((c) => c.folder === 'port-checker') && (
-              <span className="ml-auto text-xs text-gray-500 sm:text-sm">
-                (
-                {timeAgoCompact(
-                  folderCommits.find((c) => c.folder === 'port-checker')?.lastCommitDate,
-                )}
-                )
-              </span>
-            )}
           </CustomLink>
 
           <CardanoDonationDialog />

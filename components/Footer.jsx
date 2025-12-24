@@ -11,20 +11,7 @@ const Footer = () => {
     <footer className="border-t bg-secondary">
       <div className="flex flex-wrap">
         <div className="flex w-full justify-center gap-2 overflow-auto p-2 md:p-1.5">
-          <Link href={siteConfig.links.github} target="_blank" rel="noreferrer">
-            <div
-              className={cn(
-                buttonVariants({
-                  variant: "outline",
-                }),
-                "rounded-full px-3 py-0 md:py-[1.375rem]"
-              )}
-              // eslint-disable-next-line react/jsx-no-duplicate-props
-            >
-              <Icons.gitHub className="size-4 md:size-5" />
-              <span className="sr-only">GitHub</span>
-            </div>
-          </Link>
+
           <Link
             href={siteConfig.links.twitter}
             target="_blank"

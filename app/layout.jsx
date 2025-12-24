@@ -9,7 +9,6 @@ import { TailwindIndicator } from '@/components/tailwind-indicator'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Inter } from 'next/font/google'
 import CustomClerkProvider from './clerk/Provider'
-import { CommitProvider } from '@/components/CommitContext'
 import { WalletProvider } from '@/contexts/WalletContext'
 import { SpeedInsights } from '@vercel/speed-insights/next'
 import { Analytics } from '@vercel/analytics/next'
@@ -59,16 +58,15 @@ export default async function RootLayout({ children }) {
                   className: 'break-all',
                 }}
               />
-              <CommitProvider>
-                <div className="relative flex min-h-screen flex-col">
-                  <SiteHeader />
-                  <main className="flex-1">{children}</main>
-                  <Footer />
-                </div>
-                <SpeedInsights />
-                <TailwindIndicator />
-                <Analytics />
-              </CommitProvider>
+
+              <div className="relative flex min-h-screen flex-col">
+                <SiteHeader />
+                <main className="flex-1">{children}</main>
+                <Footer />
+              </div>
+              <SpeedInsights />
+              <TailwindIndicator />
+              <Analytics />
             </ThemeProvider>
           </WalletProvider>
           <ScrollToTopButton />

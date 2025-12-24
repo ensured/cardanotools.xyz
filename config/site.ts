@@ -11,7 +11,6 @@ export const siteConfig = {
   ],
   links: {
     twitter: 'https://twitter.com/fam_cardano',
-    github: 'https://github.com/ensured/cardanotools.xyz',
     docs: 'https://ui.shadcn.com',
   },
 }

@@ -60,18 +60,7 @@ const Page = () => {
     <div className="mx-auto mt-14 flex max-w-sm flex-col items-center justify-center sm:max-w-md">
       <div className="flex w-full flex-col gap-4 rounded-lg border border-border bg-card p-6">
         <h1 className="text-2xl font-bold">Generate Mnemonic Seed Phrase</h1>
-        <div className="flex flex-row gap-2 text-xs text-muted-foreground">
-          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
-          You can verify this page&apos;s source code on{' '}
-          <a
-            href="https://github.com/ensured/cardanotools.xyz/blob/main/app/generateSeed/page.tsx"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-500 hover:underline"
-          >
-            GitHub
-          </a>
-        </div>
+
         <div className="flex flex-col gap-4">
           <div className="flex flex-row gap-2 text-sm text-yellow-500">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />

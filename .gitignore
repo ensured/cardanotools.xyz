@@ -38,3 +38,5 @@ yarn-error.log*
 .env*.local
 
 certificates
+# clerk configuration (can include secrets)
+/.clerk/
